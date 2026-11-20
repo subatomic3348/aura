@@ -46,6 +46,8 @@ context.modules = [
         stream.capture.sink = true
         node.passive = true
         audio.position = [ FL FR ]
+        # Small buffers: ~5 ms instead of the ~21 ms default quantum.
+        node.latency = 256/48000
       }
       playback.props = {
         node.name = "aura_system_sound"
@@ -55,6 +57,7 @@ context.modules = [
         # Never become the default microphone.
         priority.session = 1
         priority.driver = 1
+        node.latency = 256/48000
       }
     }
   }

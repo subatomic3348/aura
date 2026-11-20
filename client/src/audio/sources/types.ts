@@ -21,6 +21,11 @@ export interface AudioSource {
   readonly kind: SourceKind;
   /** Human description of what is being shared. */
   readonly label: string;
+  /**
+   * The raw track, for live sources. When it is the only source it is sent to
+   * listeners directly (skipping the mixer's extra buffering, ~20 ms).
+   */
+  readonly track?: MediaStreamTrack;
   /** Wire this source into `ctx`; returns the node that carries its audio. */
   connect(ctx: AudioContext): AudioNode;
   /** null when this device can't control local playback for this source. */
@@ -59,6 +64,7 @@ export function trackSource(
   return {
     kind,
     label,
+    track,
     localPlayback,
     connect: (ctx) => ctx.createMediaStreamSource(new MediaStream([track])),
     onEnded: (cb) => cbs.push(cb),

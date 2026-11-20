@@ -65,6 +65,8 @@ export class RoomController extends Store<RoomState> {
     paused: boolean;
   } | null = null;
   private wakeLock: { release(): Promise<void> } | null = null;
+  /** Live source track sent directly (no mixer in the send path → lower latency). */
+  private directTrack: MediaStreamTrack | null = null;
   private starting = false;
   private claimPending = false;
   private shareError: ShareError | null = null;
@@ -412,6 +414,9 @@ export class RoomController extends Store<RoomState> {
       return;
     }
     this.source = source;
+    // One live source: send its track as-is. The mixer then only feeds the meter.
+    // Music files must go through the mixer (that's where they are played).
+    this.directTrack = source.kind !== 'file' && source.track ? source.track : null;
     this.mixer.add(source);
     // The picker/permission prompt may have backgrounded the page and
     // suspended audio (phones). Bring it back before going live.
@@ -441,7 +446,7 @@ export class RoomController extends Store<RoomState> {
   private beginTransport() {
     if (!this.mixer || this.transport) return;
     this.starting = false;
-    this.transport = new MeshTransport(this.mixer.track, this.iceServers);
+    this.transport = new MeshTransport(this.directTrack ?? this.mixer.track, this.iceServers);
     const t = this.transport;
     this.unsubs.push(
       t.on('signal', ({ peerId, payload }) => this.signaling?.send({ type: 'signal', to: peerId, payload })),
@@ -464,7 +469,10 @@ export class RoomController extends Store<RoomState> {
   private applyShareState() {
     if (!this.sharing) return;
     const state: ShareState = { muted: this.sharing.muted, paused: this.sharing.paused };
-    this.mixer?.setMuted(state.muted || state.paused);
+    const silent = state.muted || state.paused;
+    // A disabled track sends silence; the mixer gain covers the mixed path.
+    if (this.directTrack) this.directTrack.enabled = !silent;
+    this.mixer?.setMuted(silent);
     this.signaling?.send({ type: 'share:state', state });
     this.publish();
   }
@@ -474,6 +482,7 @@ export class RoomController extends Store<RoomState> {
     this.unsubs = [];
     this.transport?.close();
     this.transport = null;
+    this.directTrack = null;
     this.source?.stop();
     this.source = null;
     this.mixer?.close();
@@ -618,7 +627,9 @@ export class RoomController extends Store<RoomState> {
               ...this.sharing,
               sourceLabel: this.source?.label ?? this.sharing.sourceLabel,
               localPlayback: this.source?.localPlayback?.on ?? null,
-              audioSuspended: this.mixer ? !this.mixer.running : false,
+              // With a direct track the mixer only drives the meter, so a suspended
+              // mixer doesn't silence listeners.
+              audioSuspended: this.mixer && !this.directTrack ? !this.mixer.running : false,
             }
           : null,
       listening: this.listening ? { ...this.listening, audioSuspended: this.output ? !this.output.running : false } : null,

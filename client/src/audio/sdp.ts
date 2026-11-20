@@ -6,6 +6,8 @@
  *  maxaveragebitrate=128000    music-grade bitrate (default ~32 kbps)
  *  useinbandfec=1              forward error correction for lossy Wi-Fi
  *  usedtx=0                    no discontinuous transmission (DTX cuts quiet passages)
+ *  ptime=10                    10 ms packets instead of 20 ms: less packetisation
+ *                              delay and a smaller jitter buffer (≈ +6 kbps overhead)
  *
  * Only the `a=fmtp:` line of the Opus payload type is modified.
  */
@@ -39,5 +41,13 @@ export function tuneOpus(sdp: string): string {
   }
   for (const [k, v] of Object.entries(OPUS_PARAMS)) existing.set(k, v);
   const line = `a=fmtp:${pt} ${[...existing].map(([k, v]) => `${k}=${v}`).join(';')}`;
-  return sdp.replace(fmtpRe, line);
+  return withPtime(sdp.replace(fmtpRe, line), line);
+}
+
+const PTIME_MS = 10;
+
+/** Set `a=ptime` for the audio section (media-level attribute, placed after the Opus fmtp). */
+function withPtime(sdp: string, fmtpLine: string): string {
+  if (/^a=ptime:/m.test(sdp)) return sdp.replace(/^a=ptime:\d+/m, `a=ptime:${PTIME_MS}`);
+  return sdp.replace(fmtpLine, `${fmtpLine}\r\na=ptime:${PTIME_MS}`);
 }

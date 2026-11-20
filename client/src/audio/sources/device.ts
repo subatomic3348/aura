@@ -57,7 +57,9 @@ export async function captureDeviceAudio(device: MediaDeviceInfo): Promise<Audio
         autoGainControl: false,
         channelCount: 2,
         sampleRate: 48_000,
-      },
+        // Ask for the smallest capture buffer the platform allows.
+        latency: 0,
+      } as MediaTrackConstraints,
     });
   } catch (err) {
     const name = (err as DOMException)?.name;
