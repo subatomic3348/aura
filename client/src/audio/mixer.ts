@@ -13,6 +13,12 @@ import type { AudioSource } from './sources/types';
  *  - a meter that shows exactly what listeners receive
  *
  * Construct inside a user gesture so the AudioContext may start.
+ *
+ * Phones suspend a page's AudioContext whenever it goes to the background —
+ * including while the file picker or a permission prompt is open — and do
+ * not resume it on return. A suspended mixer sends pure silence while
+ * everything *looks* fine, so the mixer resumes itself on every return to the
+ * foreground and reports its state so the UI can offer a manual resume.
  */
 export class AudioMixer {
   readonly ctx: AudioContext;
@@ -20,6 +26,7 @@ export class AudioMixer {
   private readonly master: GainNode;
   private readonly dest: MediaStreamAudioDestinationNode;
   private readonly inputs = new Map<AudioSource, { node: AudioNode; gain: GainNode }>();
+  private stateListeners = new Set<() => void>();
 
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
@@ -31,7 +38,38 @@ export class AudioMixer {
     this.master.connect(this.dest);
     this.master.connect(analyser);
     this.level = new AnalyserLevel(analyser);
+
+    this.ctx.addEventListener('statechange', this.onState);
+    document.addEventListener('visibilitychange', this.onForeground);
+    window.addEventListener('pageshow', this.onForeground);
+    window.addEventListener('focus', this.onForeground);
   }
+
+  /** True while audio is actually flowing to listeners. */
+  get running(): boolean {
+    return this.ctx.state === 'running';
+  }
+
+  /** Try to resume; succeeds without a tap on most browsers, iOS may need one. */
+  resume(): Promise<void> {
+    if (this.ctx.state === 'running' || this.ctx.state === 'closed') return Promise.resolve();
+    return this.ctx.resume().catch(() => {});
+  }
+
+  onStateChange(fn: () => void): () => void {
+    this.stateListeners.add(fn);
+    return () => this.stateListeners.delete(fn);
+  }
+
+  private onState = () => {
+    // Some browsers report 'interrupted' (calls, Siri); try to come back.
+    if (this.ctx.state !== 'running' && document.visibilityState === 'visible') void this.resume();
+    this.stateListeners.forEach((fn) => fn());
+  };
+
+  private onForeground = () => {
+    if (document.visibilityState === 'visible') void this.resume();
+  };
 
   /** The mixed output: one stereo track to hand to the transport. */
   get track(): MediaStreamTrack {
@@ -61,6 +99,11 @@ export class AudioMixer {
   }
 
   close(): void {
+    this.ctx.removeEventListener('statechange', this.onState);
+    document.removeEventListener('visibilitychange', this.onForeground);
+    window.removeEventListener('pageshow', this.onForeground);
+    window.removeEventListener('focus', this.onForeground);
+    this.stateListeners.clear();
     for (const s of [...this.inputs.keys()]) this.remove(s);
     this.dest.stream.getTracks().forEach((t) => t.stop());
     void this.ctx.close().catch(() => {});

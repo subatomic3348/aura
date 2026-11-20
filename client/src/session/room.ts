@@ -81,6 +81,14 @@ export class RoomController extends Store<RoomState> {
   ) {
     super({ kind: 'ready', code });
     this.output = output;
+    this.watchOutput();
+  }
+
+  private unwatchOutput: (() => void) | null = null;
+
+  private watchOutput() {
+    this.unwatchOutput?.();
+    this.unwatchOutput = this.output?.onStateChange(() => this.publish()) ?? null;
   }
 
   /** Level of whatever this device is sharing or hearing. */
@@ -98,7 +106,10 @@ export class RoomController extends Store<RoomState> {
   /** Join (or create) the room. Call from a tap so audio playback is unlocked. */
   enter = (): void => {
     if (this.state.kind === 'joining' || this.state.kind === 'in-room') return;
-    this.output ??= new AudioOutput();
+    if (!this.output) {
+      this.output = new AudioOutput();
+      this.watchOutput();
+    }
     this.output.setVolume(this.volume);
     this.rejoins = 0;
     this.set({ kind: 'joining', code: this.code });
@@ -164,6 +175,19 @@ export class RoomController extends Store<RoomState> {
   /** Approved member: give the turn back without sharing. */
   declineTurn = (): void => {
     this.signaling?.send({ type: 'share:stop' });
+  };
+
+  /** Manually resume audio the device suspended (needs a tap on iOS). */
+  /** Listener: resume this device's playback from a tap. */
+  unlockPlayback = (): void => {
+    this.output?.unlock();
+    window.setTimeout(() => this.publish(), 100);
+  };
+
+  resumeAudio = (): void => {
+    void this.mixer?.resume().then(() => this.publish());
+    const p = this.player;
+    if (p && !p.getState().playing) p.play();
   };
 
   /** Play the shared sound on this device too? Listeners are unaffected. */
@@ -389,6 +413,14 @@ export class RoomController extends Store<RoomState> {
     }
     this.source = source;
     this.mixer.add(source);
+    // The picker/permission prompt may have backgrounded the page and
+    // suspended audio (phones). Bring it back before going live.
+    await this.mixer.resume();
+    if (!this.starting || !this.mixer) {
+      source.stop();
+      return;
+    }
+    this.unsubs.push(this.mixer.onStateChange(() => this.publish()));
     source.onEnded(() => this.stopSharing()); // e.g. "Stop sharing" in the browser bar
     this.sharing = { kind: source.kind, sourceLabel: source.label, startedAt: Date.now(), muted: false, paused: false };
     this.claimPending = true;
@@ -468,6 +500,7 @@ export class RoomController extends Store<RoomState> {
       quality: 'unknown',
       stats: { rttMs: null, jitterMs: null, lossPct: null },
       relayed: false,
+      audioSuspended: false,
     };
     this.sampler = new InboundStatsSampler();
     const link = new ReceiverLink(this.iceServers);
@@ -581,9 +614,14 @@ export class RoomController extends Store<RoomState> {
       starting: this.starting,
       sharing:
         this.sharing && !this.claimPending
-          ? { ...this.sharing, sourceLabel: this.source?.label ?? this.sharing.sourceLabel, localPlayback: this.source?.localPlayback?.on ?? null }
+          ? {
+              ...this.sharing,
+              sourceLabel: this.source?.label ?? this.sharing.sourceLabel,
+              localPlayback: this.source?.localPlayback?.on ?? null,
+              audioSuspended: this.mixer ? !this.mixer.running : false,
+            }
           : null,
-      listening: this.listening ? { ...this.listening } : null,
+      listening: this.listening ? { ...this.listening, audioSuspended: this.output ? !this.output.running : false } : null,
       sharerDevice: deviceOf(room.sharerId),
       shareError: this.shareError,
     };
@@ -624,6 +662,8 @@ export class RoomController extends Store<RoomState> {
     this.creds = null;
     this.room = null;
     this.shareError = null;
+    this.unwatchOutput?.();
+    this.unwatchOutput = null;
     this.output?.close();
     this.output = null;
   }

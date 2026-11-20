@@ -26,6 +26,7 @@ export class AudioOutput {
   private readonly element: HTMLAudioElement;
   private source: MediaStreamAudioSourceNode | null = null;
   private volume = 1;
+  private stateListeners = new Set<() => void>();
 
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
@@ -49,7 +50,19 @@ export class AudioOutput {
     if (document.visibilityState === 'visible' && this.ctx.state !== 'running' && this.ctx.state !== 'closed') {
       void this.ctx.resume().catch(() => {});
     }
+    this.stateListeners.forEach((fn) => fn());
   };
+
+  /** Resume from a tap (iOS only allows resuming audio inside a user gesture). */
+  unlock(): void {
+    if (this.ctx.state !== 'running' && this.ctx.state !== 'closed') void this.ctx.resume().catch(() => {});
+    void this.element.play().catch(() => {});
+  }
+
+  onStateChange(fn: () => void): () => void {
+    this.stateListeners.add(fn);
+    return () => this.stateListeners.delete(fn);
+  }
 
   attach(stream: MediaStream): void {
     this.source?.disconnect();
@@ -72,6 +85,7 @@ export class AudioOutput {
   }
 
   close(): void {
+    this.stateListeners.clear();
     document.removeEventListener('visibilitychange', this.resume);
     this.ctx.removeEventListener('statechange', this.resume);
     this.source?.disconnect();

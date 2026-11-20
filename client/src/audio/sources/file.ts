@@ -25,6 +25,7 @@ export class FileSource extends Store<PlayerState> implements AudioSource {
   private readonly el = new Audio();
   private readonly urls: string[];
   private local: GainNode | null = null;
+  private ctx: AudioContext | null = null;
   private localOn = true;
 
   constructor(private readonly files: File[]) {
@@ -61,6 +62,7 @@ export class FileSource extends Store<PlayerState> implements AudioSource {
   }
 
   connect(ctx: AudioContext): AudioNode {
+    this.ctx = ctx;
     const src = ctx.createMediaElementSource(this.el);
     const out = ctx.createGain();
     this.local = ctx.createGain();
@@ -71,6 +73,8 @@ export class FileSource extends Store<PlayerState> implements AudioSource {
   }
 
   play = (): void => {
+    // A tap on Play is a user gesture: the moment iOS allows audio to resume.
+    if (this.ctx && this.ctx.state !== 'running') void this.ctx.resume().catch(() => {});
     this.el.play().catch(() => this.patch({ blocked: true }));
   };
 

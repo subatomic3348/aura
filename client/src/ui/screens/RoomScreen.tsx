@@ -31,6 +31,8 @@ export interface RoomActions {
   setMuted(m: boolean): void;
   setPaused(p: boolean): void;
   setLocalPlayback(on: boolean): void;
+  resumeAudio(): void;
+  unlockPlayback(): void;
   requestShare(): void;
   cancelRequest(): void;
   approve(id: string): void;
@@ -418,6 +420,20 @@ function SharingPanel({ room, actions, level, player, caps }: RoomProps) {
         {listeners === 0 ? 'no one listening yet' : `${listeners} ${listeners === 1 ? 'device' : 'devices'} listening`}
       </p>
 
+      {s.audioSuspended && (
+        <Notice
+          tone="warn"
+          title={`Your ${caps.mobile ? 'phone' : 'browser'} paused the sound`}
+          actions={
+            <Button variant="primary" icon={<Play />} onClick={actions.resumeAudio}>
+              Resume sound
+            </Button>
+          }
+        >
+          Listeners hear silence until you resume. Keep Aura open on screen while sharing.
+        </Notice>
+      )}
+
       {player && <Player player={player} />}
 
       <div className={styles.meter}>
@@ -485,6 +501,17 @@ function ListeningPanel({ room, actions, level, volume, onVolume, caps }: RoomPr
           </span>
         )}
       </div>
+      {l.audioSuspended && (
+        <Notice
+          tone="warn"
+          title="Sound is paused on this device"
+          actions={
+            <Button variant="primary" icon={<Play />} onClick={actions.unlockPlayback}>
+              Tap to resume sound
+            </Button>
+          }
+        />
+      )}
       <p className={styles.sub}>
         to <strong>{l.sharerDevice}</strong>
         {live && l.relayed ? ' · via relay' : ''}

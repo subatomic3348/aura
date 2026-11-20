@@ -56,6 +56,8 @@ export interface Sharing {
   startedAt: number;
   muted: boolean;
   paused: boolean;
+  /** The device suspended audio (phones do this in the background): listeners hear silence. */
+  audioSuspended: boolean;
 }
 
 /** Someone else is sharing; I'm listening. */
@@ -67,6 +69,8 @@ export interface Listening {
   quality: Quality;
   stats: LinkStats;
   relayed: boolean;
+  /** This device suspended its audio output: a tap is needed to hear anything. */
+  audioSuspended: boolean;
 }
 
 export interface InRoom {
