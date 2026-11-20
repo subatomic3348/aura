@@ -14,6 +14,8 @@ export const config = {
   production: env.NODE_ENV === 'production',
   /** Extra allowed WebSocket origins (comma-separated). Same-origin is always allowed. */
   allowedOrigins: list(env.ALLOWED_ORIGINS),
+  /** Sites allowed to embed the app in an iframe (space-separated CSP sources). */
+  frameAncestors: env.FRAME_ANCESTORS ?? 'https://huggingface.co',
   /**
    * STUN lets peers discover their public address. Set STUN_URLS="" to disable.
    */

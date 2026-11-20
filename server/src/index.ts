@@ -16,7 +16,8 @@ const serveClient = config.production
 
 const server = createServer((req, res) => {
   // Basic hardening headers for everything we serve.
-  res.setHeader('X-Frame-Options', 'DENY');
+  // Only Hugging Face (which embeds Spaces in its page) may frame the app.
+  res.setHeader('Content-Security-Policy', `frame-ancestors 'self' ${config.frameAncestors}`);
   res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), display-capture=(self), microphone=(self)');
   if (req.url === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'text/plain' }).end(`ok ${registry.rooms.size}`);
