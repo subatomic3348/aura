@@ -26,7 +26,23 @@ npm run setup:audio  # Linux: "System sound (Aura)" input for sharing all system
 The dev server uses a self-signed certificate (browsers only allow sound capture
 on secure pages); accept the warning once per device. `AURA_HTTP=1` turns it off.
 
-## Deploy (Hugging Face Spaces — no card needed)
+## Deploy (Cloudflare Workers — free plan, recommended)
+
+The web app is served as static assets; signaling runs in a Durable Object
+(`worker/`), reusing the server's room logic.
+
+```sh
+npx wrangler login     # once
+npm run deploy:cf      # builds the client and deploys → https://aura.<account>.workers.dev
+```
+
+Optional TURN relay: `cd worker && npx wrangler secret put TURN_URLS` (and
+`TURN_USERNAME`, `TURN_CREDENTIAL`), or the `CLOUDFLARE_TURN_*` pair. Test locally
+with `npm run dev -w worker` (secrets in `worker/.dev.vars`, git-ignored).
+
+## Deploy (Hugging Face Spaces)
+
+Note: Docker Spaces now require a Hugging Face PRO subscription.
 
 The header block at the top of this file configures the Space (Docker, port 8787).
 

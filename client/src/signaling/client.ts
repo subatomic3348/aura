@@ -1,4 +1,4 @@
-import { serverMessage, WS_PATH, type ClientMessage, type ServerMessage } from '@aura/protocol';
+import { KEEPALIVE_MS, serverMessage, WS_PATH, type ClientMessage, type ServerMessage } from '@aura/protocol';
 import { Emitter } from '../lib/emitter';
 
 export type SocketStatus = 'connecting' | 'open' | 'closed';
@@ -26,6 +26,7 @@ export class SignalingClient extends Emitter<SignalingEvents> {
   private everOpened = false;
   private stopped = false;
   private retryTimer: number | undefined;
+  private keepalive: number | undefined;
 
   constructor(private readonly url: string = defaultUrl()) {
     super();
@@ -48,6 +49,8 @@ export class SignalingClient extends Emitter<SignalingEvents> {
 
     ws.onopen = () => {
       this.attempt = 0;
+      window.clearInterval(this.keepalive);
+      this.keepalive = window.setInterval(() => this.send({ type: 'ping' }), KEEPALIVE_MS);
       const reconnect = this.everOpened;
       this.everOpened = true;
       this.emit('status', { status: 'open', reconnect });
@@ -65,6 +68,7 @@ export class SignalingClient extends Emitter<SignalingEvents> {
     };
     ws.onclose = () => {
       if (this.ws !== ws) return;
+      window.clearInterval(this.keepalive);
       this.ws = null;
       this.emit('status', { status: 'closed', reconnect: this.everOpened });
       if (this.stopped) return;
@@ -88,6 +92,7 @@ export class SignalingClient extends Emitter<SignalingEvents> {
   close(): void {
     this.stopped = true;
     window.clearTimeout(this.retryTimer);
+    window.clearInterval(this.keepalive);
     const ws = this.ws;
     this.ws = null;
     ws?.close();

@@ -21,6 +21,7 @@ export const MAX_LISTENERS = MAX_MEMBERS - 1;
 export const CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford base32
 export const CODE_LENGTH = 8;
 export const WS_PATH = '/ws';
+export const KEEPALIVE_MS = 25_000;
 
 /** How long a disconnected member keeps their place (and sharer role). */
 export const MEMBER_GRACE_MS = 20_000;
@@ -67,6 +68,8 @@ export type IceServer = z.infer<typeof iceServer>;
 /* ───────────── Client → Server ───────────── */
 
 export const clientMessage = z.discriminatedUnion('type', [
+  /** Keepalive: proxies (e.g. Cloudflare) close WebSockets idle for ~100 s. */
+  z.object({ type: z.literal('ping') }),
   z.object({ type: z.literal('room:create'), device }),
   z.object({ type: z.literal('room:join'), code, device }),
   z.object({ type: z.literal('room:resume'), code, memberId: id, memberToken: token }),

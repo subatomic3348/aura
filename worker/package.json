@@ -1,0 +1,10 @@
+{
+  "name": "@aura/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8795",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  }
+}

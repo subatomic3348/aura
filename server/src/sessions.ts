@@ -95,6 +95,8 @@ export class Registry {
 
   handle(client: Client, msg: ClientMessage): void {
     switch (msg.type) {
+      case 'ping':
+        return;
       case 'room:create':
         return this.create(client, msg.device);
       case 'room:join':

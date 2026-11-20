@@ -1,0 +1,24 @@
+// Cloudflare Workers deployment: static web app + signaling in a Durable Object.
+// Deploy: `npm run deploy:cf` from the repo root (after `npx wrangler login`).
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "aura",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  // node:crypto for the shared room logic; also exposes vars/secrets on process.env.
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "../client/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Let the Worker see /ws and /healthz (and add security headers) before assets.
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RoomHub" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomHub"] }],
+  "observability": { "enabled": true }
+  // TURN (optional): `npx wrangler secret put CLOUDFLARE_TURN_KEY_ID` etc., or
+  // TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL — see server/src/config.ts.
+}
