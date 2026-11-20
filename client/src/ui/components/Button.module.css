@@ -1,0 +1,117 @@
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-m);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.m {
+  height: 36px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-small);
+}
+
+.l {
+  height: 48px;
+  padding: 0 var(--s-5);
+  font-size: var(--t-body);
+}
+
+.primary {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 86%, var(--bg));
+}
+
+.secondary {
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--ink-3);
+}
+
+/* Toggle buttons (aria-pressed) invert when engaged. */
+.secondary[aria-pressed='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.ghost:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-sunk);
+}
+
+.danger {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--danger);
+}
+
+.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.text {
+  display: inline-block;
+}
+
+.kbd {
+  margin-left: var(--s-1);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.45;
+}
+
+/* Keyboard shortcut hints mean nothing on touch screens. */
+@media (pointer: coarse) {
+  .kbd {
+    display: none;
+  }
+}

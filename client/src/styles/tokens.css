@@ -1,0 +1,90 @@
+/*
+ * Design tokens.
+ * Palette: warm paper + ink, one signal colour (orange) reserved for "live"
+ * and peaks. Status colours are muted so they read as information, not decoration.
+ */
+:root {
+  color-scheme: light;
+
+  --bg: #efeee9;
+  --surface: #f7f6f2;
+  --surface-sunk: #e6e5df;
+  --ink: #141413;
+  --ink-2: #57564f;
+  --ink-3: #8e8d86;
+  --line: rgb(20 20 19 / 0.11);
+  --line-strong: rgb(20 20 19 / 0.22);
+
+  --signal: #ff5a1f;
+  --signal-ink: #fff;
+  --ok: #2f8a57;
+  --warn: #b7791f;
+  --danger: #c8372b;
+
+  --focus: #ff5a1f;
+
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Type scale (px): 11 / 13 / 15 / 18 / 24 / 40 / 64 */
+  --t-micro: 0.6875rem;
+  --t-small: 0.8125rem;
+  --t-body: 0.9375rem;
+  --t-lead: 1.125rem;
+  --t-title: 1.5rem;
+  --t-display: clamp(2.125rem, 8vw, 4rem);
+
+  /* 4px spacing grid */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 72px;
+
+  --radius-s: 4px;
+  --radius-m: 8px;
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-med: 240ms;
+  --dur-slow: 480ms;
+
+  --page-max: 1080px;
+  --gutter: clamp(16px, 4vw, 40px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #0e0e0d;
+    --surface: #161615;
+    --surface-sunk: #0a0a09;
+    --ink: #ecebe6;
+    --ink-2: #a3a29b;
+    --ink-3: #6b6a64;
+    --line: rgb(236 235 230 / 0.09);
+    --line-strong: rgb(236 235 230 / 0.2);
+    --ok: #5cbf86;
+    --warn: #e0a447;
+    --danger: #f0614f;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0e0e0d;
+  --surface: #161615;
+  --surface-sunk: #0a0a09;
+  --ink: #ecebe6;
+  --ink-2: #a3a29b;
+  --ink-3: #6b6a64;
+  --line: rgb(236 235 230 / 0.09);
+  --line-strong: rgb(236 235 230 / 0.2);
+  --ok: #5cbf86;
+  --warn: #e0a447;
+  --danger: #f0614f;
+}

@@ -1,0 +1,68 @@
+.rings {
+  display: block;
+  overflow: visible;
+}
+
+.ring {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+  transform-origin: 50px 50px;
+  opacity: calc(0.5 - var(--i) * 0.14);
+  transition: opacity var(--dur-slow) ease;
+}
+
+.core {
+  fill: var(--ink-3);
+  transform-origin: 50px 50px;
+  transition:
+    fill var(--dur-slow) ease,
+    transform var(--dur-slow) var(--ease-out);
+}
+
+/* Connecting: a ripple travels outward, one ring after another. */
+.rings[data-mode='connecting'] .ring {
+  animation: ripple 1.8s var(--ease-out) infinite;
+  animation-delay: calc(var(--i) * 0.22s);
+}
+
+.rings[data-mode='connecting'] .core {
+  fill: var(--ink);
+}
+
+@keyframes ripple {
+  0% {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  30% {
+    opacity: 0.55;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+}
+
+/* Live: core lights up; rings breathe very slowly. */
+.rings[data-mode='live'] .core {
+  fill: var(--signal);
+  transform: scale(1.15);
+}
+
+.rings[data-mode='live'] .ring {
+  animation: breathe 4.8s var(--ease-in-out) infinite;
+  animation-delay: calc(var(--i) * 0.4s);
+}
+
+@keyframes breathe {
+  50% {
+    transform: scale(1.03);
+    opacity: calc(0.62 - var(--i) * 0.14);
+  }
+}
+
+.rings[data-mode='off'] .ring {
+  opacity: calc(0.18 - var(--i) * 0.05);
+}

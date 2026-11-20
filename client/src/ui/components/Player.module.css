@@ -1,0 +1,100 @@
+.player {
+  display: grid;
+  gap: var(--s-2);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.count,
+.time {
+  font-size: var(--t-micro);
+  color: var(--ink-3);
+}
+
+.bar {
+  position: relative;
+  height: 16px;
+  cursor: pointer;
+  --progress: 0;
+}
+
+.bar::before,
+.bar::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+}
+
+.bar::before {
+  right: 0;
+  background: var(--line-strong);
+}
+
+.bar::after {
+  width: calc(var(--progress) * 100%);
+  background: var(--ink);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-sunk);
+}
+
+.btn:disabled {
+  opacity: 0.3;
+}
+
+.main {
+  width: 44px;
+  height: 44px;
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.main:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 86%, var(--bg));
+}
+
+.blocked {
+  font-size: var(--t-small);
+  color: var(--warn);
+}

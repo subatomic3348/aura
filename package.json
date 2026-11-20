@@ -1,0 +1,24 @@
+{
+  "name": "aura",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/protocol",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c gray,blue \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client",
+    "start": "NODE_ENV=production npm run start -w server",
+    "test": "npm test -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+    "setup:audio": "bash scripts/setup-audio.sh"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5"
+  }
+}

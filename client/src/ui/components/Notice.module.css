@@ -1,0 +1,45 @@
+.notice {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border-left: 2px solid var(--tone);
+  background: color-mix(in srgb, var(--tone) 6%, var(--surface));
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  --tone: var(--ink-3);
+}
+
+.notice[data-tone='warn'] {
+  --tone: var(--warn);
+}
+
+.notice[data-tone='danger'] {
+  --tone: var(--danger);
+}
+
+.icon {
+  flex: none;
+  padding-top: 2px;
+  color: var(--tone);
+}
+
+.body {
+  display: grid;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.title {
+  font-weight: 500;
+}
+
+.text {
+  color: var(--ink-2);
+  font-size: var(--t-small);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
