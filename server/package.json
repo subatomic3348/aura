@@ -9,13 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "tsx": "^4.23.15",
     "ws": "^8.23.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
-    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12"
   }

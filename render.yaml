@@ -1,0 +1,25 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# New → Blueprint → pick this repo. Fill in the TURN secrets when asked.
+services:
+  - type: web
+    name: aura
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # TURN relay (pick ONE option; see server/src/config.ts).
+      # Option A — Cloudflare Realtime TURN:
+      - key: CLOUDFLARE_TURN_KEY_ID
+        sync: false
+      - key: CLOUDFLARE_TURN_API_TOKEN
+        sync: false
+      # Option B — static credentials (e.g. Metered):
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_USERNAME
+        sync: false
+      - key: TURN_CREDENTIAL
+        sync: false

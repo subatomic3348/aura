@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { config, iceServers } from './config.ts';
+import { config, iceServers, startTurn } from './config.ts';
 import { Registry } from './sessions.ts';
 import { attachSignaling } from './signaling.ts';
 import { staticHandler } from './static.ts';
@@ -15,6 +15,9 @@ const serveClient = config.production
   : null;
 
 const server = createServer((req, res) => {
+  // Basic hardening headers for everything we serve.
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), display-capture=(self), microphone=(self)');
   if (req.url === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'text/plain' }).end(`ok ${registry.rooms.size}`);
     return;
@@ -27,7 +30,7 @@ attachSignaling(server, registry, { allowedOrigins: config.allowedOrigins, log }
 
 server.listen(config.port, config.host, () => {
   log(`signaling on ${config.host}:${config.port}${config.production ? ' (serving client/dist)' : ''}`);
-  if (!config.turnUrls.length) log('no TURN configured — listeners behind strict NATs may fail to connect');
+  startTurn(log);
 });
 
 const shutdown = () => {
