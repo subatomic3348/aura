@@ -724,6 +724,17 @@ export class RoomController extends Store<RoomState> {
       shareError: this.shareError,
     };
     this.set(next);
+    this.keepAliveInBackground(room, me);
+  }
+
+  /** While there's something to hear or say, keep it going with the screen off (phones). */
+  private keepAliveInBackground(room: RoomSnapshot, me: string) {
+    const listeningTo = this.listening ? room.members.find((x) => x.id === room.sharerId)?.device ?? 'the room' : null;
+    const recording = this.voice.micState !== 'off';
+    const voice = recording || room.speakers.some((s) => s.id !== me);
+    if (!listeningTo && !voice) return this.output?.keepAlive(null);
+    const subtitle = listeningTo ? `Listening to ${listeningTo}${voice ? ' · voice chat' : ''}` : 'Voice chat';
+    this.output?.keepAlive({ title: `Aura · room ${this.code}`, subtitle, recording });
   }
 
   private inRoom(): InRoom | null {
@@ -732,9 +743,11 @@ export class RoomController extends Store<RoomState> {
 
   /* ═════════════ utils / cleanup ═════════════ */
 
-  private onPageHide = () => {
-    // Tell the room right away instead of after the grace period.
-    this.signaling?.send({ type: 'room:leave' });
+  private onPageHide = (e: PageTransitionEvent) => {
+    // Only a page that is really going away leaves: `persisted` means it may
+    // come back (back/forward cache, and some phones when switching apps).
+    // Otherwise tell the room right away instead of after the grace period.
+    if (!e.persisted) this.signaling?.send({ type: 'room:leave' });
   };
 
   private after(ms: number, fn: () => void) {

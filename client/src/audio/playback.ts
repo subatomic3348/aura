@@ -1,4 +1,5 @@
 import { getCapabilities } from '../lib/capabilities';
+import { BackgroundAudio, type BackgroundInfo } from './background';
 import { AnalyserLevel, type LevelSource } from './level';
 
 interface Voice {
@@ -40,6 +41,10 @@ export class AudioOutput {
   private voices = new Map<string, Voice>();
   private volume = 1;
   private blocked = false;
+  /** Paused from the phone's media notification: everything plays muted. */
+  private held = false;
+  private lastRetry = 0;
+  private readonly background: BackgroundAudio;
   private stateListeners = new Set<() => void>();
 
   constructor() {
@@ -55,7 +60,9 @@ export class AudioOutput {
     // Unlock the element inside the tap (no source yet; the promise may reject harmlessly).
     void this.element.play().catch(() => {});
     this.element.addEventListener('playing', this.notify);
-    this.element.addEventListener('pause', this.notify);
+    this.element.addEventListener('pause', this.onPause);
+    // Created inside the same tap, so it may play later (see background.ts).
+    this.background = new BackgroundAudio((held) => this.setHeld(held));
 
     // Mobile browsers suspend audio when backgrounded / on interruptions.
     document.addEventListener('visibilitychange', this.resume);
@@ -63,6 +70,32 @@ export class AudioOutput {
   }
 
   private notify = () => this.stateListeners.forEach((fn) => fn());
+
+  /**
+   * The browser paused the stream (phones may when the page goes to the
+   * background). Restart it straight away rather than on return; throttled so
+   * we never fight the system (e.g. during a phone call).
+   */
+  private onPause = () => {
+    this.notify();
+    const now = performance.now();
+    if (!this.element.srcObject || now - this.lastRetry < 3000) return;
+    this.lastRetry = now;
+    this.playElement();
+  };
+
+  /**
+   * Keep sound going while the page is in the background (screen locked,
+   * another app in front). Pass null when there's nothing to hear or say.
+   */
+  keepAlive(info: BackgroundInfo | null): void {
+    this.background.set(info);
+  }
+
+  private setHeld(held: boolean) {
+    this.held = held;
+    this.applyVolume();
+  }
 
   private resume = () => {
     if (document.visibilityState === 'visible') {
@@ -75,7 +108,7 @@ export class AudioOutput {
 
   private newElement(): HTMLAudioElement {
     const el = new Audio();
-    el.muted = this.mode === 'webaudio';
+    el.muted = this.mode === 'webaudio' || this.held;
     el.autoplay = true;
     el.setAttribute('playsinline', '');
     return el;
@@ -154,11 +187,18 @@ export class AudioOutput {
   /** 0..1 slider value, mapped to a perceptual (squared) curve. */
   setVolume(v: number): void {
     this.volume = Math.min(1, Math.max(0, v));
+    this.applyVolume();
+  }
+
+  private applyVolume() {
     const g = this.volume * this.volume;
     if (this.mode === 'element') {
-      this.element.volume = g;
-      for (const voice of this.voices.values()) voice.element.volume = g;
-    } else this.gain.gain.setTargetAtTime(g, this.ctx.currentTime, 0.015);
+      const els = [this.element, ...[...this.voices.values()].map((x) => x.element)];
+      for (const el of els) {
+        el.volume = g;
+        el.muted = this.held;
+      }
+    } else this.gain.gain.setTargetAtTime(this.held ? 0 : g, this.ctx.currentTime, 0.015);
   }
 
   /** True when sound can actually reach the speakers. */
@@ -172,7 +212,8 @@ export class AudioOutput {
     document.removeEventListener('visibilitychange', this.resume);
     this.ctx.removeEventListener('statechange', this.resume);
     this.element.removeEventListener('playing', this.notify);
-    this.element.removeEventListener('pause', this.notify);
+    this.element.removeEventListener('pause', this.onPause);
+    this.background.close();
     for (const id of [...this.voices.keys()]) this.detachVoice(id);
     this.source?.disconnect();
     this.element.pause();
