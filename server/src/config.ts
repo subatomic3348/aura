@@ -82,13 +82,17 @@ async function refreshCloudflare(log: (m: string) => void): Promise<void> {
   }
 }
 
-export function startTurn(log: (m: string) => void): void {
-  if (turnMode === 'cloudflare') {
-    void refreshCloudflare(log);
-    // Refresh well before expiry.
-    setInterval(() => void refreshCloudflare(log), (CF_TTL_SEC / 2) * 1000).unref();
-  }
-  log(turnMode === 'none' ? 'TURN: not configured — some mobile-data devices may fail to connect' : `TURN: ${turnMode}`);
+/**
+ * Resolves once TURN credentials are available (or the first fetch failed),
+ * so callers can wait before handing ICE servers to the first members.
+ */
+export function startTurn(log: (m: string) => void): Promise<void> {
+  log(turnMode === 'none' ? 'TURN: not configured — devices on different networks may fail to connect' : `TURN: ${turnMode}`);
+  if (turnMode !== 'cloudflare') return Promise.resolve();
+  // Refresh well before expiry. (Workers timers have no unref().)
+  const timer = setInterval(() => void refreshCloudflare(log), (CF_TTL_SEC / 2) * 1000) as { unref?: () => void };
+  timer.unref?.();
+  return refreshCloudflare(log);
 }
 
 /** ICE servers handed to each client when it joins a room. */

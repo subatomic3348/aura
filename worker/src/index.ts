@@ -24,13 +24,16 @@ const log = (m: string) => console.log(`[aura] ${m}`);
 
 export class RoomHub extends DurableObject<Env> {
   private readonly registry = new Registry({ iceServers });
+  /** TURN credentials are fetched on (cold) start; the first joiners must get them too. */
+  private readonly turnReady: Promise<void>;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    startTurn(log);
+    this.turnReady = startTurn(log);
   }
 
   override async fetch(_req: Request): Promise<Response> {
+    await this.turnReady;
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     server.accept();

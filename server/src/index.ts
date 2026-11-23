@@ -31,7 +31,7 @@ attachSignaling(server, registry, { allowedOrigins: config.allowedOrigins, log }
 
 server.listen(config.port, config.host, () => {
   log(`signaling on ${config.host}:${config.port}${config.production ? ' (serving client/dist)' : ''}`);
-  startTurn(log);
+  void startTurn(log);
 });
 
 const shutdown = () => {
