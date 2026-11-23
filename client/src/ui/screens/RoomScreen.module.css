@@ -448,3 +448,110 @@ button.wide {
 .stopBtn:hover {
   border-color: var(--danger);
 }
+
+/* ───────────── voice ───────────── */
+
+.voice {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5) var(--s-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+}
+
+.voice .pendingAsk {
+  width: 100%;
+}
+
+.micMeter {
+  position: relative;
+  isolation: isolate;
+  padding: var(--s-1) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.micTag {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  border-radius: var(--radius-s);
+  color: var(--ink-2);
+  transition:
+    color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
+}
+
+.micTag[data-state='muted'] {
+  color: var(--ink-3);
+}
+
+.micTag[data-speaking='true'] {
+  background: var(--signal);
+  color: var(--signal-ink);
+  animation: talk 0.9s ease-in-out infinite;
+}
+
+.person[data-speaking='true'] .device {
+  color: var(--signal);
+  font-weight: 500;
+}
+
+@keyframes talk {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 22%, transparent);
+  }
+}
+
+/* "Who's talking" pop-up, pinned under the top bar. */
+.speakingNow {
+  position: fixed;
+  z-index: 20;
+  top: calc(env(safe-area-inset-top) + 76px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  max-width: calc(100vw - 2 * var(--gutter));
+  padding: 6px 14px 6px 6px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.2);
+  font-size: var(--t-small);
+  pointer-events: none;
+  animation: speakIn var(--dur-med) var(--ease-out) both;
+}
+
+.speakingIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--signal);
+  color: var(--signal-ink);
+  animation: talk 0.9s ease-in-out infinite;
+}
+
+.speakingNames {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.speakingNames strong {
+  font-weight: 600;
+}
+
+@keyframes speakIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px) scale(0.96);
+  }
+}

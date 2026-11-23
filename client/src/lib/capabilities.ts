@@ -12,12 +12,12 @@ export type Platform = 'windows' | 'mac' | 'linux' | 'chromeos' | 'android' | 'i
  *  - system  all sound the computer plays (desktop Chromium)
  *  - tab     one browser tab (desktop Chromium)
  *  - file    music files from this device (every modern browser, incl. phones)
- *  - mic     the microphone (secure pages)
  *
  * Phone browsers cannot capture other apps' sound — no web API exists for it —
- * so phones share files or the microphone.
+ * so phones share files. Microphones aren't a share mode: they're two-way
+ * voice (`voice`), which several members can use at once alongside sharing.
  */
-export type ShareMode = 'system' | 'tab' | 'file' | 'mic';
+export type ShareMode = 'system' | 'tab' | 'file';
 
 export interface Capabilities {
   browser: BrowserFamily;
@@ -25,6 +25,8 @@ export interface Capabilities {
   mobile: boolean;
   secureContext: boolean;
   shareModes: ShareMode[];
+  /** This device can talk (microphone access on a secure page). */
+  voice: boolean;
   /** Why system/tab sharing is unavailable here, written for the user. */
   captureReason: string | null;
 }
@@ -67,12 +69,12 @@ export function getCapabilities(): Capabilities {
   let captureReason: string | null = null;
   if (!mobile && secureContext && hasDisplay && browser === 'chromium') shareModes.push('system', 'tab');
   shareModes.push('file');
-  if (secureContext && hasMic) shareModes.push('mic');
+  const voice = secureContext && hasMic;
 
-  if (mobile) captureReason = 'Phone browsers can’t capture other apps’ sound, so share music files or the microphone.';
+  if (mobile) captureReason = 'Phone browsers can’t capture other apps’ sound, so share music files from this phone.';
   else if (!secureContext) captureReason = 'Open this page with https:// to share this computer’s sound.';
   else if (browser !== 'chromium') captureReason = 'To share all this computer’s sound, use Chrome, Edge or Brave.';
 
-  cached = { browser, platform, mobile, secureContext, shareModes, captureReason };
+  cached = { browser, platform, mobile, secureContext, shareModes, voice, captureReason };
   return cached;
 }

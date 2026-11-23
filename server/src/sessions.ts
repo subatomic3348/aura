@@ -9,8 +9,12 @@
  *    current sharer ("hand over now").
  *  - There is always a host while the room has members (passed to the
  *    longest-standing member when the host leaves).
- *  - Every relayed signal has the sharer on one end (media only flows
- *    sharer → listener), so members can't use the server to message each other.
+ *  - At most MAX_SPEAKERS live microphones per room. Only the host, or a
+ *    member the host approved, may turn theirs on; turning it off uses the
+ *    approval up.
+ *  - Every relayed signal has a media sender on one end — the sharer for the
+ *    'share' link, a speaker for 'voice' — so members can't use the server to
+ *    message each other.
  *  - A dropped member keeps their place — and the sharer role — for a grace
  *    period, since their peer-to-peer audio usually keeps flowing meanwhile.
  *  - A room is deleted when its last member is gone.
@@ -20,6 +24,7 @@ import {
   CODE_ALPHABET,
   CODE_LENGTH,
   MAX_MEMBERS,
+  MAX_SPEAKERS,
   MEMBER_GRACE_MS,
   type ClientMessage,
   type ErrorCode,
@@ -27,6 +32,7 @@ import {
   type RoomSnapshot,
   type ServerMessage,
   type ShareState,
+  type SignalLink,
   type SignalPayload,
 } from '@aura/protocol';
 
@@ -53,6 +59,10 @@ export interface Room {
   shareState: ShareState | null;
   requests: string[];
   grantId: string | null;
+  /** Live microphones (id → muted), in the order they went live. */
+  speakers: Map<string, boolean>;
+  micRequests: string[];
+  micGrants: Set<string>;
   createdAt: number;
   expiry: NodeJS.Timeout;
 }
@@ -121,8 +131,24 @@ export class Registry {
         return this.deny(client, msg.memberId);
       case 'share:revoke':
         return this.revoke(client);
+      case 'mic:start':
+        return this.micStart(client, msg.muted);
+      case 'mic:state':
+        return this.micState(client, msg.muted);
+      case 'mic:stop':
+        return this.micStop(client);
+      case 'mic:request':
+        return this.micRequest(client);
+      case 'mic:cancel-request':
+        return this.micCancelRequest(client);
+      case 'mic:approve':
+        return this.micApprove(client, msg.memberId);
+      case 'mic:deny':
+        return this.micDeny(client, msg.memberId);
+      case 'mic:revoke':
+        return this.micRevoke(client, msg.memberId);
       case 'signal':
-        return this.signal(client, msg.to, msg.payload);
+        return this.signal(client, msg.to, msg.link, msg.fromSender, msg.payload);
     }
   }
 
@@ -157,6 +183,9 @@ export class Registry {
       shareState: null,
       requests: [],
       grantId: null,
+      speakers: new Map(),
+      micRequests: [],
+      micGrants: new Set(),
       createdAt: Date.now(),
       expiry: setTimeout(() => this.destroy(room), this.opts.maxRoomMs),
     };
@@ -309,15 +338,102 @@ export class Registry {
     this.broadcast(room);
   }
 
-  private signal(client: Client, to: string, payload: SignalPayload) {
+  /* ───────────── voice ───────────── */
+
+  private micStart(client: Client, muted: boolean) {
     const ctx = this.member(client);
     if (!ctx) return;
     const { room, id } = ctx;
-    if (to === id || (room.sharerId !== id && room.sharerId !== to)) {
-      return this.error(client, 'wrong-state', 'Signals must go to or from the sharer.');
+    if (room.speakers.has(id)) return; // already live
+    if (room.hostId !== id && !room.micGrants.has(id)) {
+      return this.error(client, 'not-allowed', 'Ask the host for permission to talk.', 'mic');
+    }
+    if (room.speakers.size >= MAX_SPEAKERS) {
+      return this.error(client, 'busy', `Only ${MAX_SPEAKERS} microphones can be on at once.`, 'mic');
+    }
+    room.speakers.set(id, muted);
+    room.micGrants.delete(id);
+    room.micRequests = room.micRequests.filter((r) => r !== id);
+    this.broadcast(room);
+  }
+
+  private micState(client: Client, muted: boolean) {
+    const ctx = this.member(client);
+    if (!ctx || !ctx.room.speakers.has(ctx.id)) return;
+    ctx.room.speakers.set(ctx.id, muted);
+    this.broadcast(ctx.room);
+  }
+
+  private micStop(client: Client) {
+    const ctx = this.member(client);
+    if (!ctx) return;
+    const { room, id } = ctx;
+    const wasLive = room.speakers.delete(id);
+    const wasGranted = room.micGrants.delete(id);
+    if (wasLive || wasGranted) this.broadcast(room);
+  }
+
+  private micRequest(client: Client) {
+    const ctx = this.member(client);
+    if (!ctx) return;
+    const { room, id } = ctx;
+    if (room.hostId === id || room.micGrants.has(id) || room.speakers.has(id)) return; // no need
+    if (!room.micRequests.includes(id)) room.micRequests.push(id);
+    this.broadcast(room);
+  }
+
+  private micCancelRequest(client: Client) {
+    const ctx = this.member(client);
+    if (!ctx) return;
+    const before = ctx.room.micRequests.length;
+    ctx.room.micRequests = ctx.room.micRequests.filter((r) => r !== ctx.id);
+    if (ctx.room.micRequests.length !== before) this.broadcast(ctx.room);
+  }
+
+  private micApprove(client: Client, target: string) {
+    const ctx = this.hostOnly(client);
+    if (!ctx) return;
+    const { room } = ctx;
+    if (!room.members.has(target) || room.speakers.has(target)) return;
+    room.micRequests = room.micRequests.filter((r) => r !== target);
+    room.micGrants.add(target);
+    this.broadcast(room);
+  }
+
+  private micDeny(client: Client, target: string) {
+    const ctx = this.hostOnly(client);
+    if (!ctx) return;
+    const { room } = ctx;
+    room.micRequests = room.micRequests.filter((r) => r !== target);
+    room.members
+      .get(target)
+      ?.client?.send({ type: 'error', code: 'denied', message: 'The host declined your request to talk.', scope: 'mic' });
+    this.broadcast(room);
+  }
+
+  /** Host: turn someone's mic off (or withdraw an unused approval). */
+  private micRevoke(client: Client, target: string) {
+    const ctx = this.hostOnly(client);
+    if (!ctx) return;
+    const { room } = ctx;
+    const wasLive = room.speakers.delete(target);
+    const wasGranted = room.micGrants.delete(target);
+    if (wasLive || wasGranted) this.broadcast(room);
+  }
+
+  /* ───────────── relay ───────────── */
+
+  private signal(client: Client, to: string, link: SignalLink, fromSender: boolean, payload: SignalPayload) {
+    const ctx = this.member(client);
+    if (!ctx) return;
+    const { room, id } = ctx;
+    const sender = fromSender ? id : to;
+    const isSender = link === 'share' ? room.sharerId === sender : room.speakers.has(sender);
+    if (to === id || !isSender) {
+      return this.error(client, 'wrong-state', 'Signals must go to or from whoever sends the media.');
     }
     // A target that just left is not an error: messages can cross in flight.
-    room.members.get(to)?.client?.send({ type: 'signal', from: id, payload });
+    room.members.get(to)?.client?.send({ type: 'signal', from: id, link, fromSender, payload });
   }
 
   /* ───────────── internals ───────────── */
@@ -352,6 +468,9 @@ export class Registry {
     }
     if (room.grantId === id) room.grantId = null;
     room.requests = room.requests.filter((r) => r !== id);
+    room.speakers.delete(id);
+    room.micGrants.delete(id);
+    room.micRequests = room.micRequests.filter((r) => r !== id);
     // Pass hosting to the longest-standing member (Map keeps join order).
     if (room.hostId === id) room.hostId = room.members.keys().next().value ?? null;
     if (room.members.size === 0) this.destroy(room);
@@ -381,6 +500,9 @@ export class Registry {
       shareState: room.shareState,
       requests: [...room.requests],
       grantId: room.grantId,
+      speakers: [...room.speakers].map(([id, muted]) => ({ id, muted })),
+      micRequests: [...room.micRequests],
+      micGrants: [...room.micGrants],
     };
   }
 
@@ -391,7 +513,7 @@ export class Registry {
     }
   }
 
-  private error(client: Client, code: ErrorCode, message: string) {
-    client.send({ type: 'error', code, message });
+  private error(client: Client, code: ErrorCode, message: string, scope?: 'mic') {
+    client.send(scope ? { type: 'error', code, message, scope } : { type: 'error', code, message });
   }
 }

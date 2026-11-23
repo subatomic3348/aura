@@ -113,3 +113,17 @@ export const Warning = (p: IconProps) => (
     <circle cx="8" cy="11.25" r=".4" fill="currentColor" />
   </Icon>
 );
+
+export const Mic = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5.75" y="1.75" width="4.5" height="8" rx="2.25" />
+    <path d="M3.25 7.75a4.75 4.75 0 0 0 9.5 0M8 12.5v2" />
+  </Icon>
+);
+
+export const MicOff = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M10.25 6.5V4a2.25 2.25 0 0 0-4.5 0v.5M5.75 7.25v.5A2.25 2.25 0 0 0 9.4 9.5" />
+    <path d="M3.25 7.75a4.75 4.75 0 0 0 7.9 3.55M12.6 9a4.7 4.7 0 0 0 .15-1.25M8 12.5v2M2.5 2.5l11 11" />
+  </Icon>
+);

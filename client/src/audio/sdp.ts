@@ -11,7 +11,7 @@
  *
  * Only the `a=fmtp:` line of the Opus payload type is modified.
  */
-const OPUS_PARAMS: Record<string, string> = {
+const MUSIC: Record<string, string> = {
   stereo: '1',
   'sprop-stereo': '1',
   maxaveragebitrate: '128000',
@@ -20,7 +20,20 @@ const OPUS_PARAMS: Record<string, string> = {
   usedtx: '0',
 };
 
-export function tuneOpus(sdp: string): string {
+/** Voice links: mono speech at a fraction of the bitrate (one stream per speaker per member). */
+const VOICE: Record<string, string> = {
+  stereo: '0',
+  'sprop-stereo': '0',
+  maxaveragebitrate: '40000',
+  maxplaybackrate: '48000',
+  useinbandfec: '1',
+  usedtx: '0',
+};
+
+export type OpusProfile = 'music' | 'voice';
+
+export function tuneOpus(sdp: string, profile: OpusProfile = 'music'): string {
+  const OPUS_PARAMS = profile === 'voice' ? VOICE : MUSIC;
   const pt = /a=rtpmap:(\d+) opus\/48000\/2/i.exec(sdp)?.[1];
   if (!pt) return sdp;
   const fmtpRe = new RegExp(`^a=fmtp:${pt} (.*)$`, 'm');

@@ -2,10 +2,9 @@ import type { IceServer, SignalPayload } from '@aura/protocol';
 import { Emitter } from '../../lib/emitter';
 import { rateLink, sampleOutbound } from '../quality';
 import { candidatePayload, toRtcIceServers } from '../rtc';
-import { tuneOpus } from '../sdp';
+import { tuneOpus, type OpusProfile } from '../sdp';
 import type { BroadcastTransport, PeerConnState, TransportEvents } from './types';
 
-const MAX_BITRATE = 128_000;
 const STATS_MS = 2000;
 /** How long `disconnected` may last before we force an ICE restart. */
 const DISCONNECT_RESTART_MS = 3000;
@@ -27,6 +26,7 @@ class HostPeer {
     track: MediaStreamTrack,
     iceServers: IceServer[],
     private active: boolean,
+    private readonly profile: OpusProfile,
     private readonly out: {
       signal(p: SignalPayload): void;
       state(s: PeerConnState): void;
@@ -70,7 +70,7 @@ class HostPeer {
     this.negotiating = true;
     try {
       const offer = await this.pc.createOffer({ iceRestart });
-      offer.sdp = tuneOpus(offer.sdp ?? '');
+      offer.sdp = tuneOpus(offer.sdp ?? '', this.profile);
       await this.pc.setLocalDescription(offer);
       this.out.signal({ kind: 'description', type: 'offer', sdp: offer.sdp });
     } catch (err) {
@@ -104,7 +104,7 @@ class HostPeer {
     if (!params.encodings?.length) return;
     for (const enc of params.encodings) {
       enc.active = this.active;
-      enc.maxBitrate = MAX_BITRATE;
+      enc.maxBitrate = MAX_BITRATE[this.profile];
       enc.priority = 'high';
       enc.networkPriority = 'high';
     }
@@ -120,9 +120,12 @@ class HostPeer {
   }
 }
 
+const MAX_BITRATE: Record<OpusProfile, number> = { music: 128_000, voice: 48_000 };
+
 /**
  * One RTCPeerConnection per receiver. Upload grows linearly with receivers
- * (~128 kbps each), which is fine for the 10-listener cap on any home uplink.
+ * (~128 kbps each for music, ~40 for voice), which is fine for the 10-listener
+ * cap on any home uplink.
  */
 export class MeshTransport extends Emitter<TransportEvents> implements BroadcastTransport {
   private peers = new Map<string, HostPeer>();
@@ -132,6 +135,7 @@ export class MeshTransport extends Emitter<TransportEvents> implements Broadcast
   constructor(
     private readonly track: MediaStreamTrack,
     private iceServers: IceServer[],
+    private readonly profile: OpusProfile = 'music',
   ) {
     super();
     this.statsTimer = window.setInterval(() => void this.pollStats(), STATS_MS);
@@ -139,7 +143,7 @@ export class MeshTransport extends Emitter<TransportEvents> implements Broadcast
 
   addPeer(peerId: string): void {
     if (this.peers.has(peerId)) return;
-    const peer = new HostPeer(peerId, this.track, this.iceServers, this.active, {
+    const peer = new HostPeer(peerId, this.track, this.iceServers, this.active, this.profile, {
       signal: (payload) => this.emit('signal', { peerId, payload }),
       state: (state) => this.emit('state', { peerId, state }),
     });

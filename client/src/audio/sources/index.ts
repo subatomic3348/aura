@@ -2,7 +2,6 @@ import { getCapabilities } from '../../lib/capabilities';
 import { captureDeviceAudio, findSystemDevice } from './device';
 import { captureDisplayAudio } from './display';
 import { FileSource } from './file';
-import { captureMicrophone } from './mic';
 import type { ShareMode } from '../../lib/capabilities';
 import type { AudioSource } from './types';
 
@@ -18,7 +17,6 @@ export type { ShareMode };
  * picker opens (Windows: "Entire screen" + "Share system audio").
  */
 export async function captureSound(mode: Exclude<ShareMode, 'file'>): Promise<AudioSource> {
-  if (mode === 'mic') return captureMicrophone();
   if (mode === 'system') {
     const askPermission = getCapabilities().platform === 'linux';
     const device = await findSystemDevice(askPermission);

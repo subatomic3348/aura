@@ -1,7 +1,7 @@
 import type { IceServer, SignalPayload } from '@aura/protocol';
 import { Emitter } from '../lib/emitter';
 import { candidatePayload, toRtcIceServers } from './rtc';
-import { tuneOpus } from './sdp';
+import { tuneOpus, type OpusProfile } from './sdp';
 
 export type LinkState = 'connecting' | 'connected' | 'disconnected' | 'failed';
 
@@ -22,7 +22,10 @@ export class ReceiverLink extends Emitter<LinkEvents> {
   private chain: Promise<void> = Promise.resolve();
   private closed = false;
 
-  constructor(iceServers: IceServer[]) {
+  constructor(
+    iceServers: IceServer[],
+    private readonly profile: OpusProfile = 'music',
+  ) {
     super();
     this.pc = new RTCPeerConnection({ iceServers: toRtcIceServers(iceServers), bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' });
     this.pc.onicecandidate = (e) => this.emit('signal', candidatePayload(e.candidate));
@@ -51,7 +54,7 @@ export class ReceiverLink extends Emitter<LinkEvents> {
       for (const c of this.queued.splice(0)) await this.pc.addIceCandidate(c).catch(() => {});
       const answer = await this.pc.createAnswer();
       // Receiver's answer is what tells the sender's encoder to go stereo / high bitrate.
-      answer.sdp = tuneOpus(answer.sdp ?? '');
+      answer.sdp = tuneOpus(answer.sdp ?? '', this.profile);
       await this.pc.setLocalDescription(answer);
       this.emit('signal', { kind: 'description', type: 'answer', sdp: answer.sdp });
     } else if (payload.candidate) {

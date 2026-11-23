@@ -10,8 +10,16 @@
  *    current sharer is stopped and the requester is GRANTED the right to share
  *  - the host can stop whoever is sharing (revoke)
  *
- * Media flows peer-to-peer (sharer → each listener). The server only keeps
- * room membership and relays SDP/ICE between the sharer and each listener.
+ * VOICE runs alongside: up to MAX_SPEAKERS members may have their microphone
+ * live at once, and everyone hears all of them. Same permission model — the
+ * host talks freely; others send a mic REQUEST the host approves. Turning the
+ * mic off uses the approval up (muting keeps the place); the host can turn
+ * anyone's mic off.
+ *
+ * Media flows peer-to-peer (media sender → each other member, one send-only
+ * connection per pair and link). The server only keeps room membership and
+ * relays SDP/ICE between a media sender (the sharer, or a speaker) and the
+ * members receiving them.
  */
 import { z } from 'zod';
 
@@ -25,6 +33,13 @@ export const KEEPALIVE_MS = 25_000;
 
 /** How long a disconnected member keeps their place (and sharer role). */
 export const MEMBER_GRACE_MS = 20_000;
+
+/**
+ * Live microphones at once. Each speaker uploads one voice stream per member
+ * (~40 kbps each) and each member decodes one per speaker, so this bounds the
+ * mesh for phones.
+ */
+export const MAX_SPEAKERS = 6;
 
 const code = z.string().length(CODE_LENGTH).regex(/^[0-9A-HJKMNP-TV-Z]+$/);
 const id = z.string().min(8).max(64).regex(/^[A-Za-z0-9_-]+$/);
@@ -58,6 +73,10 @@ export type SignalPayload = z.infer<typeof signalPayload>;
 export const shareState = z.object({ muted: z.boolean(), paused: z.boolean() });
 export type ShareState = z.infer<typeof shareState>;
 
+/** Which media a relayed signal belongs to: the shared sound, or a speaker's voice. */
+export const signalLink = z.enum(['share', 'voice']);
+export type SignalLink = z.infer<typeof signalLink>;
+
 const iceServer = z.object({
   urls: z.union([z.string(), z.array(z.string())]),
   username: z.string().optional(),
@@ -87,8 +106,26 @@ export const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('share:revoke') }),
   z.object({ type: z.literal('share:state'), state: shareState }),
   z.object({ type: z.literal('share:stop') }),
-  /** Relay to another member. One side of every signal must be the sharer. */
-  z.object({ type: z.literal('signal'), to: id, payload: signalPayload }),
+  /**
+   * Turn my microphone on. Allowed for the host, or a member the host
+   * approved (the approval is used up when the mic goes off).
+   */
+  z.object({ type: z.literal('mic:start'), muted: z.boolean() }),
+  z.object({ type: z.literal('mic:state'), muted: z.boolean() }),
+  /** Mic off; also gives an unused approval back. */
+  z.object({ type: z.literal('mic:stop') }),
+  z.object({ type: z.literal('mic:request') }),
+  z.object({ type: z.literal('mic:cancel-request') }),
+  /** Host only. */
+  z.object({ type: z.literal('mic:approve'), memberId: id }),
+  z.object({ type: z.literal('mic:deny'), memberId: id }),
+  z.object({ type: z.literal('mic:revoke'), memberId: id }),
+  /**
+   * Relay to another member. `fromSender`: I am the media sender on this link
+   * (the sharer for 'share', a speaker for 'voice'); otherwise the recipient
+   * must be. Two members can have several links between them at once.
+   */
+  z.object({ type: z.literal('signal'), to: id, link: signalLink, fromSender: z.boolean(), payload: signalPayload }),
 ]);
 export type ClientMessage = z.infer<typeof clientMessage>;
 
@@ -116,6 +153,9 @@ export const member = z.object({
 });
 export type Member = z.infer<typeof member>;
 
+export const speaker = z.object({ id, muted: z.boolean() });
+export type Speaker = z.infer<typeof speaker>;
+
 export const roomSnapshot = z.object({
   code,
   members: z.array(member),
@@ -126,6 +166,12 @@ export const roomSnapshot = z.object({
   requests: z.array(id),
   /** Member the host approved to share next (cleared once they stop). */
   grantId: id.nullable(),
+  /** Members with a live microphone, in the order they turned it on. */
+  speakers: z.array(speaker),
+  /** Members waiting for the host's approval to talk, oldest first. */
+  micRequests: z.array(id),
+  /** Members the host approved to talk who haven't turned their mic on yet. */
+  micGrants: z.array(id),
 });
 export type RoomSnapshot = z.infer<typeof roomSnapshot>;
 
@@ -138,7 +184,13 @@ export const serverMessage = z.discriminatedUnion('type', [
     room: roomSnapshot,
   }),
   z.object({ type: z.literal('room:update'), room: roomSnapshot }),
-  z.object({ type: z.literal('signal'), from: id, payload: signalPayload }),
-  z.object({ type: z.literal('error'), code: errorCode, message: z.string() }),
+  z.object({ type: z.literal('signal'), from: id, link: signalLink, fromSender: z.boolean(), payload: signalPayload }),
+  z.object({
+    type: z.literal('error'),
+    code: errorCode,
+    message: z.string(),
+    /** Set when the error is about the microphone rather than sharing. */
+    scope: z.literal('mic').optional(),
+  }),
 ]);
 export type ServerMessage = z.infer<typeof serverMessage>;

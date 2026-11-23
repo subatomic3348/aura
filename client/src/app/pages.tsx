@@ -56,7 +56,7 @@ export function RoomPage({ rawCode }: { rawCode: string | null }) {
   };
 
   const shown = valid ? state : ({ kind: 'closed', code, reason: 'not-found' } as const);
-  return <RoomScreen state={shown} actions={ctrl} level={ctrl.level} player={ctrl.player} caps={caps} volume={volume} onVolume={onVolume} />;
+  return <RoomScreen state={shown} actions={ctrl} level={ctrl.level} micLevel={ctrl.micLevel} player={ctrl.player} caps={caps} volume={volume} onVolume={onVolume} />;
 }
 
 export function NotFoundPage() {

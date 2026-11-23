@@ -4,7 +4,7 @@
  *  system  everything the computer plays (virtual device, or screen share on Windows)
  *  tab     one browser tab (share picker)
  *  file    music files from this device, played by Aura itself (works on phones)
- *  mic     the device's microphone (works on phones)
+ *  mic     the device's microphone (two-way voice; not mixed with the others)
  *
  * Sources plug into the mixer's AudioContext, so the transport never knows
  * which kind it is sending.

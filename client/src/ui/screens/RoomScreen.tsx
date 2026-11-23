@@ -4,7 +4,15 @@ import type { FileSource, ShareMode } from '../../audio/sources';
 import type { Capabilities } from '../../lib/capabilities';
 import { formatCode } from '../../lib/code';
 import { navigate } from '../../lib/router';
-import { MAX_MEMBERS, type InRoom, type MemberView, type RoomState, type ShareError } from '../../session/types';
+import {
+  MAX_MEMBERS,
+  MAX_SPEAKERS,
+  type InRoom,
+  type MemberView,
+  type RoomState,
+  type ShareError,
+  type VoiceError,
+} from '../../session/types';
 import { Button } from '../components/Button';
 import { CopyField } from '../components/CopyField';
 import { Elapsed } from '../components/Elapsed';
@@ -17,7 +25,7 @@ import { Rings } from '../components/Rings';
 import { Shell } from '../components/Shell';
 import { QualityBars, StatusDot, qualityLabel } from '../components/Status';
 import { Switch } from '../components/Switch';
-import { ArrowLeft, Broadcast, Check, Headphones, Pause, Play, Speaker, SpeakerOff, Stop } from '../icons';
+import { ArrowLeft, Broadcast, Check, Headphones, Mic, MicOff, Pause, Play, Speaker, SpeakerOff, Stop } from '../icons';
 import styles from './RoomScreen.module.css';
 
 export interface RoomActions {
@@ -40,12 +48,24 @@ export interface RoomActions {
   revoke(): void;
   declineTurn(): void;
   dismissShareError(): void;
+  startMic(): void;
+  stopMic(): void;
+  setMicMuted(muted: boolean): void;
+  requestMic(): void;
+  cancelMicRequest(): void;
+  declineMic(): void;
+  approveMic(id: string): void;
+  denyMic(id: string): void;
+  revokeMic(id: string): void;
+  dismissVoiceError(): void;
 }
 
 interface Props {
   state: RoomState;
   actions: RoomActions;
   level: LevelSource | null;
+  /** My microphone, while it is on. */
+  micLevel: LevelSource | null;
   player: FileSource | null;
   caps: Capabilities;
   volume: number;
@@ -132,7 +152,13 @@ function Room(props: RoomProps) {
 
   return (
     <Shell
-      confirmLeave={room.sharing ? 'Leaving stops your sound for everyone. Leave?' : undefined}
+      confirmLeave={
+        room.sharing
+          ? 'Leaving stops your sound for everyone. Leave?'
+          : room.voice.mic === 'live'
+            ? 'Leaving turns your microphone off. Leave?'
+            : undefined
+      }
       meta={
         <span className={styles.meta}>
           {room.signaling !== 'connected' && (
@@ -147,11 +173,13 @@ function Room(props: RoomProps) {
       }
     >
       <FilePickerHost actions={actions}>
+      <SpeakingNow room={room} />
       <div className={`${styles.column} enter`}>
-        {room.isHost && room.requests.length > 0 && <Requests room={room} actions={actions} />}
+        {room.isHost && (room.requests.length > 0 || room.micRequests.length > 0) && <Requests room={room} actions={actions} />}
         {alone && invite}
         <ShareNotice error={room.shareError} onDismiss={actions.dismissShareError} />
         <Stage {...props} />
+        <VoicePanel {...props} />
         <People room={room} actions={actions} />
         {!alone && invite}
         <div className={styles.leaveRow}>
@@ -176,11 +204,29 @@ function Stage(props: RoomProps) {
 
 function Requests({ room, actions }: { room: InRoom; actions: RoomActions }) {
   return (
-    <section className={styles.requests} aria-label="Share requests" aria-live="polite">
+    <section className={styles.requests} aria-label="Requests" aria-live="polite">
+      {room.micRequests.map((r) => (
+        <div key={`mic-${r.id}`} className={styles.request}>
+          <span className={styles.requestText}>
+            <strong>{r.device}</strong> wants to talk
+            {room.voice.speakerCount >= MAX_SPEAKERS ? (
+              <span className={styles.requestSub}> — all {MAX_SPEAKERS} mics are on; they can start when one turns off</span>
+            ) : null}
+          </span>
+          <span className={styles.requestActions}>
+            <Button variant="ghost" onClick={() => actions.denyMic(r.id)}>
+              Decline
+            </Button>
+            <Button variant="primary" icon={<Mic />} onClick={() => actions.approveMic(r.id)}>
+              Let them talk
+            </Button>
+          </span>
+        </div>
+      ))}
       {room.requests.map((r) => (
         <div key={r.id} className={styles.request}>
           <span className={styles.requestText}>
-            <strong>{r.device}</strong> wants to share
+            <strong>{r.device}</strong> wants to share sound
             {room.sharerDevice ? (
               <span className={styles.requestSub}> — approving stops {room.sharing ? 'your' : `${room.sharerDevice}’s`} sound</span>
             ) : null}
@@ -235,14 +281,12 @@ const ALT_LABEL: Record<ShareMode, string> = {
   system: 'All sound',
   tab: 'A tab',
   file: 'Music file',
-  mic: 'Microphone',
 };
 
 const PRIMARY_LABEL: Record<ShareMode, string> = {
   system: 'Share all my sound',
   tab: 'Share a tab',
   file: 'Share music from this device',
-  mic: 'Share my microphone',
 };
 
 /**
@@ -549,6 +593,158 @@ function ListeningPanel({ room, actions, level, volume, onVolume, caps }: RoomPr
   );
 }
 
+/* ───────────── voice ───────────── */
+
+const VOICE_ERROR: Record<VoiceError['code'], { tone: 'warn' | 'danger'; text: string }> = {
+  busy: { tone: 'warn', text: `All ${MAX_SPEAKERS} microphones are already on.` },
+  'not-allowed': { tone: 'warn', text: 'Ask the host before talking.' },
+  denied: { tone: 'warn', text: 'The host declined your request to talk.' },
+  'taken-over': { tone: 'warn', text: 'The host turned your microphone off.' },
+  'permission-denied': { tone: 'warn', text: 'Microphone access was blocked.' },
+  'no-audio-track': { tone: 'danger', text: 'The microphone produced no sound.' },
+  unsupported: { tone: 'danger', text: 'This browser can’t use the microphone.' },
+  'insecure-context': { tone: 'danger', text: 'The microphone needs a secure (https) page.' },
+  unknown: { tone: 'danger', text: 'The microphone couldn’t start.' },
+};
+
+/** Names for the "who's talking" pop-up: "You", "Pixel", "Pixel and iPhone", "Pixel, iPhone +2". */
+function speakingText(list: InRoom['voice']['speaking']): { names: string; verb: string } {
+  const names = list.map((s) => (s.isMe ? 'You' : s.device));
+  const verb = list.length === 1 && !list[0]!.isMe ? 'is talking' : 'are talking';
+  if (names.length <= 2) return { names: names.join(' and '), verb };
+  return { names: `${names.slice(0, 2).join(', ')} +${names.length - 2}`, verb };
+}
+
+/** Pops up at the top of the screen while anyone in the room is talking. */
+function SpeakingNow({ room }: { room: InRoom }) {
+  const list = room.voice.speaking;
+  if (!list.length) return null;
+  const { names, verb } = speakingText(list);
+  return (
+    <div className={styles.speakingNow} aria-hidden="true">
+      <span className={styles.speakingIcon}>
+        <Mic size={14} />
+      </span>
+      <span className={styles.speakingNames}>
+        <strong>{names}</strong> {verb}
+      </span>
+    </div>
+  );
+}
+
+function VoicePanel({ room, actions, caps, micLevel }: RoomProps) {
+  const v = room.voice;
+  const err = v.error ? VOICE_ERROR[v.error.code] : null;
+
+  let body: ReactNode;
+  if (v.mic === 'live') {
+    body = (
+      <>
+        <div className={styles.micMeter}>
+          <LevelEnvelope source={micLevel} active={!v.muted} height={36} label="Your microphone" />
+          {v.muted && <p className={styles.overlay}>Muted — nobody hears you</p>}
+        </div>
+        <div className={styles.controls}>
+          <Button aria-pressed={v.muted} icon={v.muted ? <MicOff /> : <Mic />} onClick={() => actions.setMicMuted(!v.muted)}>
+            {v.muted ? 'Unmute' : 'Mute'}
+          </Button>
+          <span className={styles.spacer} />
+          <Button variant="danger" icon={<MicOff />} onClick={actions.stopMic}>
+            Mic off
+          </Button>
+        </div>
+        {!room.isHost && <p className={styles.tip}>Turning your mic off ends your turn; ask again to talk later. Mute keeps it.</p>}
+      </>
+    );
+  } else if (v.mic === 'starting') {
+    body = (
+      <div className={styles.pendingAsk}>
+        <span className={styles.pendingText}>
+          <StatusDot tone="warn" pulse /> Allow microphone access when your device asks…
+        </span>
+        <button type="button" className={styles.linkBtn} onClick={actions.stopMic}>
+          Cancel
+        </button>
+      </div>
+    );
+  } else if (!caps.voice) {
+    body = <p className={styles.hint}>This page can’t use the microphone{caps.secureContext ? ' in this browser' : ' (it needs https)'}.</p>;
+  } else if (v.full) {
+    body = <p className={styles.hint}>All {MAX_SPEAKERS} microphones are on. You can talk when one turns off.</p>;
+  } else if (v.canTalk) {
+    body = (
+      <div className={styles.pendingAsk}>
+        <Button variant={room.sharing || room.listening ? 'secondary' : 'primary'} icon={<Mic />} className={styles.wide} onClick={actions.startMic}>
+          Turn on my mic
+        </Button>
+        {v.myRequest === 'granted' && (
+          <button type="button" className={styles.linkBtn} onClick={actions.declineMic}>
+            Not now
+          </button>
+        )}
+      </div>
+    );
+  } else if (v.myRequest === 'pending') {
+    body = (
+      <div className={styles.pendingAsk}>
+        <span className={styles.pendingText}>
+          <StatusDot tone="warn" pulse /> Waiting for {room.hostDevice ?? 'the host'} to let you talk…
+        </span>
+        <button type="button" className={styles.linkBtn} onClick={actions.cancelMicRequest}>
+          Cancel request
+        </button>
+      </div>
+    );
+  } else {
+    body = (
+      <Button variant="secondary" icon={<Mic />} className={styles.wide} onClick={actions.requestMic}>
+        Ask to talk
+      </Button>
+    );
+  }
+
+  return (
+    <section className={styles.voice} aria-labelledby="voice-title">
+      <div className={styles.panelHead}>
+        <h2 id="voice-title" className="label">
+          {v.mic === 'live' ? (v.muted ? 'Your mic is muted' : 'Your mic is on') : 'Talk'}
+        </h2>
+        <span className={`mono ${styles.count}`}>
+          {v.speakerCount}/{MAX_SPEAKERS} mics on
+        </span>
+      </div>
+      {v.myRequest === 'granted' && v.mic === 'off' && (
+        <p className={styles.lead}>{room.hostDevice ?? 'The host'} approved you — turn your mic on to talk.</p>
+      )}
+      {err && (
+        <Notice
+          tone={err.tone}
+          title={err.text}
+          actions={
+            <Button variant="ghost" onClick={actions.dismissVoiceError}>
+              Dismiss
+            </Button>
+          }
+        >
+          {v.error?.detail}
+        </Notice>
+      )}
+      {v.audioSuspended && !room.listening && (
+        <Notice
+          tone="warn"
+          title="Sound is paused on this device"
+          actions={
+            <Button variant="primary" icon={<Play />} onClick={actions.unlockPlayback}>
+              Tap to hear voices
+            </Button>
+          }
+        />
+      )}
+      {body}
+    </section>
+  );
+}
+
 /* ───────────── people ───────────── */
 
 function People({ room, actions }: { room: InRoom; actions: RoomActions }) {
@@ -564,14 +760,29 @@ function People({ room, actions }: { room: InRoom; actions: RoomActions }) {
       </div>
       <ul className={styles.list}>
         {room.members.map((m) => (
-          <Person key={m.id} m={m} canStop={room.isHost && m.isSharer && !m.isMe} onStop={actions.revoke} />
+          <Person
+            key={m.id}
+            m={m}
+            canStop={room.isHost && m.isSharer && !m.isMe}
+            onStop={actions.revoke}
+            canMicOff={room.isHost && m.mic !== null && !m.isMe}
+            onMicOff={() => actions.revokeMic(m.id)}
+          />
         ))}
       </ul>
     </section>
   );
 }
 
-function Person({ m, canStop, onStop }: { m: MemberView; canStop: boolean; onStop(): void }) {
+interface PersonProps {
+  m: MemberView;
+  canStop: boolean;
+  onStop(): void;
+  canMicOff: boolean;
+  onMicOff(): void;
+}
+
+function Person({ m, canStop, onStop, canMicOff, onMicOff }: PersonProps) {
   const status = !m.online
     ? 'Reconnecting…'
     : m.link === 'connecting'
@@ -580,7 +791,7 @@ function Person({ m, canStop, onStop }: { m: MemberView; canStop: boolean; onSto
         ? 'Reconnecting…'
         : null;
   return (
-    <li className={styles.person} data-online={m.online}>
+    <li className={styles.person} data-online={m.online} data-speaking={m.speaking}>
       <StatusDot tone={!m.online ? 'warn' : m.isSharer ? 'live' : 'ok'} pulse={m.isSharer} />
       <span className={styles.device}>
         {m.device}
@@ -588,12 +799,30 @@ function Person({ m, canStop, onStop }: { m: MemberView; canStop: boolean; onSto
       </span>
       {m.isHost && <span className={styles.tagHost}>Host</span>}
       {m.isSharer && <span className={styles.tag}>Sharing</span>}
+      {m.mic && (
+        <span
+          className={styles.micTag}
+          data-state={m.mic}
+          data-speaking={m.speaking}
+          title={m.mic === 'muted' ? 'Microphone muted' : m.speaking ? 'Talking' : 'Microphone on'}
+        >
+          {m.mic === 'muted' ? <MicOff size={14} /> : <Mic size={14} />}
+          <span className="sr-only">{m.mic === 'muted' ? 'Mic muted' : m.speaking ? 'Talking' : 'Mic on'}</span>
+        </span>
+      )}
       {m.requested && <span className={styles.tagMuted}>Asking</span>}
       {m.granted && !m.isSharer && <span className={styles.tagMuted}>Approved</span>}
+      {m.micRequested && <span className={styles.tagMuted}>Asks to talk</span>}
+      {m.micGranted && <span className={styles.tagMuted}>Can talk</span>}
       {status ? (
         <span className={styles.pending}>{status}</span>
       ) : (
         m.link === 'connected' && m.quality && <QualityBars quality={m.quality} />
+      )}
+      {canMicOff && (
+        <button type="button" className={styles.stopBtn} onClick={onMicOff} aria-label={`Turn ${m.device}’s microphone off`}>
+          Mic off
+        </button>
       )}
       {canStop && (
         <button type="button" className={styles.stopBtn} onClick={onStop} aria-label={`Stop ${m.device} sharing`}>

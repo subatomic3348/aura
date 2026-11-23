@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_MEMBERS, type ServerMessage } from '@aura/protocol';
+import { MAX_MEMBERS, MAX_SPEAKERS, type ServerMessage } from '@aura/protocol';
 import { Registry, type Client } from '../src/sessions.ts';
 
 type TestClient = Client & {
@@ -152,18 +152,21 @@ describe('Registry (rooms)', () => {
     const { c, id: cId } = join(code);
     const { c: d, id: dId } = join(code);
 
+    const share = { link: 'share' as const };
     // Nobody sharing: listeners cannot message each other.
-    reg.handle(c, { type: 'signal', to: dId, payload: offer });
+    reg.handle(c, { type: 'signal', to: dId, ...share, fromSender: true, payload: offer });
     expect(c.last('error').code).toBe('wrong-state');
 
     reg.handle(a, { type: 'share:start', state: on });
-    reg.handle(a, { type: 'signal', to: cId, payload: offer });
-    expect(c.last('signal')).toEqual({ type: 'signal', from: aId, payload: offer });
-    reg.handle(c, { type: 'signal', to: aId, payload: offer });
+    reg.handle(a, { type: 'signal', to: cId, ...share, fromSender: true, payload: offer });
+    expect(c.last('signal')).toEqual({ type: 'signal', from: aId, ...share, fromSender: true, payload: offer });
+    reg.handle(c, { type: 'signal', to: aId, ...share, fromSender: false, payload: offer });
     expect(a.last('signal').from).toBe(cId);
-    // Still no listener ↔ listener relay while someone shares.
+    // Still no listener ↔ listener relay while someone shares, whatever they claim.
     d.inbox.length = 0;
-    reg.handle(c, { type: 'signal', to: dId, payload: offer });
+    reg.handle(c, { type: 'signal', to: dId, ...share, fromSender: true, payload: offer });
+    reg.handle(c, { type: 'signal', to: dId, ...share, fromSender: false, payload: offer });
+    reg.handle(c, { type: 'signal', to: dId, link: 'voice', fromSender: true, payload: offer });
     expect(d.inbox.some((m) => m.type === 'signal')).toBe(false);
   });
 
@@ -208,6 +211,129 @@ describe('Registry (rooms)', () => {
     const impostor = client();
     reg.handle(impostor, { type: 'room:resume', code, memberId: aId, memberToken: 'x'.repeat(32) });
     expect(impostor.last('error').code).toBe('unauthorized');
+  });
+
+  /* ───────────── voice ───────────── */
+
+  it('lets the host talk freely; others need approval, used up when the mic goes off', () => {
+    const { a, code, aId } = room();
+    const { c, id: cId } = join(code);
+    reg.handle(a, { type: 'mic:start', muted: false });
+    expect(c.last('room:update').room.speakers).toEqual([{ id: aId, muted: false }]);
+
+    reg.handle(c, { type: 'mic:start', muted: false });
+    expect(c.last('error')).toMatchObject({ code: 'not-allowed', scope: 'mic' });
+
+    reg.handle(c, { type: 'mic:request' });
+    expect(a.last('room:update').room.micRequests).toEqual([cId]);
+    reg.handle(a, { type: 'mic:approve', memberId: cId });
+    expect(c.last('room:update').room).toMatchObject({ micRequests: [], micGrants: [cId] });
+
+    // Both talk at once; the music sharer is untouched.
+    reg.handle(c, { type: 'mic:start', muted: true });
+    expect(a.last('room:update').room).toMatchObject({
+      speakers: [
+        { id: aId, muted: false },
+        { id: cId, muted: true },
+      ],
+      micGrants: [],
+      sharerId: null,
+    });
+    reg.handle(c, { type: 'mic:state', muted: false });
+    expect(a.last('room:update').room.speakers[1]).toEqual({ id: cId, muted: false });
+
+    reg.handle(c, { type: 'mic:stop' });
+    expect(a.last('room:update').room.speakers.map((s) => s.id)).toEqual([aId]);
+    reg.handle(c, { type: 'mic:start', muted: false });
+    expect(c.last('error')).toMatchObject({ code: 'not-allowed', scope: 'mic' });
+  });
+
+  it('talking and sharing are independent', () => {
+    const { a, code, aId } = room();
+    const { c, id: cId } = join(code);
+    reg.handle(c, { type: 'share:request' });
+    reg.handle(a, { type: 'share:approve', memberId: cId });
+    reg.handle(c, { type: 'share:start', state: on });
+    reg.handle(a, { type: 'mic:start', muted: false });
+    const snap = c.last('room:update').room;
+    expect(snap.sharerId).toBe(cId);
+    expect(snap.speakers.map((s) => s.id)).toEqual([aId]);
+  });
+
+  it('mic deny tells the requester; only the host can approve, deny or revoke mics', () => {
+    const { a, code, aId } = room();
+    const { c, id: cId } = join(code);
+    const { c: d } = join(code);
+    reg.handle(c, { type: 'mic:request' });
+    reg.handle(d, { type: 'mic:approve', memberId: cId });
+    expect(d.last('error').code).toBe('not-allowed');
+    reg.handle(a, { type: 'mic:start', muted: false });
+    reg.handle(d, { type: 'mic:revoke', memberId: aId });
+    expect(d.last('error').code).toBe('not-allowed');
+    expect(d.last('room:update').room.speakers).toHaveLength(1);
+    reg.handle(a, { type: 'mic:deny', memberId: cId });
+    expect(c.last('error')).toMatchObject({ code: 'denied', scope: 'mic' });
+    expect(c.last('room:update').room.micRequests).toEqual([]);
+  });
+
+  it('the host can turn anyone’s mic off', () => {
+    const { a, code } = room();
+    const { c, id: cId } = join(code);
+    reg.handle(c, { type: 'mic:request' });
+    reg.handle(a, { type: 'mic:approve', memberId: cId });
+    reg.handle(c, { type: 'mic:start', muted: false });
+    reg.handle(a, { type: 'mic:revoke', memberId: cId });
+    expect(c.last('room:update').room).toMatchObject({ speakers: [], micGrants: [] });
+  });
+
+  it(`caps live microphones at ${MAX_SPEAKERS}`, () => {
+    const { a, code } = room();
+    reg.handle(a, { type: 'mic:start', muted: false });
+    for (let i = 1; i < MAX_SPEAKERS; i++) {
+      const { c, id } = join(code);
+      reg.handle(a, { type: 'mic:approve', memberId: id });
+      reg.handle(c, { type: 'mic:start', muted: false });
+    }
+    const { c: extra, id: extraId } = join(code);
+    reg.handle(a, { type: 'mic:approve', memberId: extraId });
+    reg.handle(extra, { type: 'mic:start', muted: false });
+    expect(extra.last('error')).toMatchObject({ code: 'busy', scope: 'mic' });
+    expect(extra.last('room:update').room.speakers).toHaveLength(MAX_SPEAKERS);
+  });
+
+  it('relays voice signals only to or from a speaker, on separate links', () => {
+    const { a, code, aId } = room();
+    const { c, id: cId } = join(code);
+    const { c: d, id: dId } = join(code);
+    const voice = { link: 'voice' as const };
+
+    reg.handle(a, { type: 'mic:start', muted: false });
+    reg.handle(a, { type: 'signal', to: cId, ...voice, fromSender: true, payload: offer });
+    expect(c.last('signal')).toEqual({ type: 'signal', from: aId, ...voice, fromSender: true, payload: offer });
+    reg.handle(c, { type: 'signal', to: aId, ...voice, fromSender: false, payload: offer });
+    expect(a.last('signal')).toMatchObject({ from: cId, link: 'voice', fromSender: false });
+
+    // A talks but isn't sharing: no 'share' link to A, and C isn't a speaker.
+    a.inbox.length = 0;
+    reg.handle(c, { type: 'signal', to: aId, link: 'share', fromSender: false, payload: offer });
+    reg.handle(c, { type: 'signal', to: aId, ...voice, fromSender: true, payload: offer });
+    expect(a.inbox.some((m) => m.type === 'signal')).toBe(false);
+    d.inbox.length = 0;
+    reg.handle(c, { type: 'signal', to: dId, ...voice, fromSender: false, payload: offer });
+    expect(d.inbox.some((m) => m.type === 'signal')).toBe(false);
+  });
+
+  it('frees a dropped speaker’s mic after the grace period, keeps it within', () => {
+    const { a, code, aId, aToken } = room();
+    const { c } = join(code);
+    reg.handle(a, { type: 'mic:start', muted: false });
+    reg.disconnect(a);
+    const back = client();
+    reg.handle(back, { type: 'room:resume', code, memberId: aId, memberToken: aToken });
+    expect(back.last('room:joined').room.speakers).toEqual([{ id: aId, muted: false }]);
+    reg.disconnect(back);
+    vi.advanceTimersByTime(501);
+    expect(c.last('room:update').room.speakers).toEqual([]);
   });
 
   it('keeps the room when the creator leaves, deletes it when the last member leaves', () => {

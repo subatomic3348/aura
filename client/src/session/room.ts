@@ -1,4 +1,4 @@
-import type { IceServer, RoomSnapshot, ServerMessage, ShareState } from '@aura/protocol';
+import { MAX_SPEAKERS, type IceServer, type RoomSnapshot, type ServerMessage, type ShareState } from '@aura/protocol';
 import type { LevelSource } from '../audio/level';
 import { AudioMixer } from '../audio/mixer';
 import { AudioOutput } from '../audio/playback';
@@ -13,6 +13,7 @@ import { listenUrl } from '../lib/origin';
 import { SignalingClient } from '../signaling/client';
 import { Store } from './store';
 import type { InRoom, Listening, MemberView, PeerLinkState, Quality, RoomState, ShareError } from './types';
+import { VoiceController } from './voice';
 
 const JOIN_TIMEOUT_MS = 8000;
 /** Listener: media path down this long → rejoin as a fresh member. */
@@ -30,6 +31,9 @@ const STATS_MS = 2000;
  *
  * Who may share is decided by the room's host (see protocol): the host shares
  * freely; others request, and the host's approval hands the role over.
+ *
+ * Voice (live microphones, several at once) runs independently of sharing in
+ * `VoiceController`, with the same host-approval model.
  *
  * The UI calls actions; everything else reacts to room snapshots from the server.
  */
@@ -73,6 +77,14 @@ export class RoomController extends Store<RoomState> {
   private peerLinks = new Map<string, { link: PeerLinkState; quality: Quality }>();
   private unsubs: Array<() => void> = [];
 
+  // voice
+  private voice = new VoiceController({
+    me: () => this.creds?.memberId ?? null,
+    output: () => this.output,
+    send: (msg) => this.signaling?.send(msg),
+    changed: () => this.publish(),
+  });
+
   /**
    * @param code   room to join, or null to create one
    * @param output an AudioOutput created inside the user's tap (unlocks playback), if available
@@ -96,6 +108,11 @@ export class RoomController extends Store<RoomState> {
   /** Level of whatever this device is sharing or hearing. */
   get level(): LevelSource | null {
     return this.mixer?.level ?? this.output?.level ?? null;
+  }
+
+  /** My microphone's level while it is on. */
+  get micLevel(): LevelSource | null {
+    return this.voice.level;
   }
 
   /** The music player, while sharing files. */
@@ -125,7 +142,7 @@ export class RoomController extends Store<RoomState> {
     this.set({ kind: 'closed', code, reason: 'left' });
   };
 
-  /** Start sharing a live source (system sound, a tab, the mic). Call from a tap. */
+  /** Start sharing a live source (system sound, a tab). Call from a tap. */
   share = (mode: Exclude<ShareMode, 'file'>): void => {
     if (!this.beginStart()) return;
     void this.startWith(captureSound(mode));
@@ -231,6 +248,49 @@ export class RoomController extends Store<RoomState> {
     this.publish();
   };
 
+  /* ── voice ── */
+
+  /** Turn my microphone on (host, or approved). Call from a tap. */
+  startMic = (): void => this.voice.start();
+
+  /** Mic off — or cancel turning it on. To talk again, ask again (host excepted). */
+  stopMic = (): void => this.voice.stop();
+
+  setMicMuted = (muted: boolean): void => this.voice.setMuted(muted);
+
+  requestMic = (): void => {
+    this.voice.error = null;
+    this.signaling?.send({ type: 'mic:request' });
+    this.publish();
+  };
+
+  cancelMicRequest = (): void => {
+    this.signaling?.send({ type: 'mic:cancel-request' });
+  };
+
+  /** Approved member: give the approval back without talking. */
+  declineMic = (): void => {
+    this.signaling?.send({ type: 'mic:stop' });
+  };
+
+  approveMic = (memberId: string): void => {
+    this.signaling?.send({ type: 'mic:approve', memberId });
+  };
+
+  denyMic = (memberId: string): void => {
+    this.signaling?.send({ type: 'mic:deny', memberId });
+  };
+
+  /** Host: turn a member's microphone off. */
+  revokeMic = (memberId: string): void => {
+    this.signaling?.send({ type: 'mic:revoke', memberId });
+  };
+
+  dismissVoiceError = (): void => {
+    this.voice.error = null;
+    this.publish();
+  };
+
   override dispose(): void {
     if (this.state.kind === 'in-room' || this.state.kind === 'joining') this.signaling?.send({ type: 'room:leave' });
     this.teardown();
@@ -270,6 +330,7 @@ export class RoomController extends Store<RoomState> {
         this.creds = { memberId: m.memberId, memberToken: m.memberToken };
         this.iceServers = m.iceServers;
         this.transport?.setIceServers(m.iceServers);
+        this.voice.setIceServers(m.iceServers);
         if (this.code !== m.room.code) {
           this.code = m.room.code;
           // A created room gets its real URL so reload/share works.
@@ -279,16 +340,19 @@ export class RoomController extends Store<RoomState> {
         this.applySnapshot(m.room);
         // We may have changed networks (often why the socket dropped).
         this.transport?.restartAll();
+        this.voice.restartAll();
         break;
       case 'room:update':
         this.applySnapshot(m.room);
         break;
       case 'signal':
-        if (this.transport && this.room?.sharerId === this.creds?.memberId) this.transport.handleSignal(m.from, m.payload);
+        if (m.link === 'voice') this.voice.handleSignal(m.from, m.fromSender, m.payload);
+        else if (!m.fromSender) this.transport?.handleSignal(m.from, m.payload);
         else if (m.from === this.linkSharerId) this.link?.handle(m.payload);
         break;
       case 'error':
-        this.onError(m.code, m.message);
+        if (m.scope === 'mic') this.voice.onError(m.code, m.message);
+        else this.onError(m.code, m.message);
         break;
     }
   };
@@ -374,6 +438,8 @@ export class RoomController extends Store<RoomState> {
       this.closeLink();
     }
 
+    this.voice.sync(room);
+
     if (this.state.kind === 'joining') this.clearTimers();
     this.publish();
   }
@@ -430,7 +496,7 @@ export class RoomController extends Store<RoomState> {
     this.sharing = { kind: source.kind, sourceLabel: source.label, startedAt: Date.now(), muted: false, paused: false };
     this.claimPending = true;
     this.signaling?.send({ type: 'share:start', state: { muted: false, paused: false } });
-    if (source.kind === 'file' || source.kind === 'mic') void this.keepAwake();
+    if (source.kind === 'file') void this.keepAwake();
   }
 
   /** Phones stop audio when the screen locks; keep it on while sharing. */
@@ -449,7 +515,9 @@ export class RoomController extends Store<RoomState> {
     this.transport = new MeshTransport(this.directTrack ?? this.mixer.track, this.iceServers);
     const t = this.transport;
     this.unsubs.push(
-      t.on('signal', ({ peerId, payload }) => this.signaling?.send({ type: 'signal', to: peerId, payload })),
+      t.on('signal', ({ peerId, payload }) =>
+        this.signaling?.send({ type: 'signal', to: peerId, link: 'share', fromSender: true, payload }),
+      ),
       t.on('state', ({ peerId, state }) => {
         const prev = this.peerLinks.get(peerId);
         if (!prev || state === 'failed') return;
@@ -514,7 +582,7 @@ export class RoomController extends Store<RoomState> {
     this.sampler = new InboundStatsSampler();
     const link = new ReceiverLink(this.iceServers);
     this.link = link;
-    link.on('signal', (payload) => this.signaling?.send({ type: 'signal', to: sharerId, payload }));
+    link.on('signal', (payload) => this.signaling?.send({ type: 'signal', to: sharerId, link: 'share', fromSender: false, payload }));
     link.on('stream', (stream) => this.output?.attach(stream));
     link.on('state', (s) => this.onLinkState(s));
     this.armRecovery();
@@ -589,8 +657,11 @@ export class RoomController extends Store<RoomState> {
     if (!room || !me || !this.code) return;
     if (this.state.kind !== 'in-room' && this.state.kind !== 'joining') return;
 
+    const speakers = new Map(room.speakers.map((s) => [s.id, s.muted]));
+    const speaking = new Set(this.voice.speakingIds);
     const members: MemberView[] = room.members.map((x) => {
       const pl = this.sharing ? this.peerLinks.get(x.id) : undefined;
+      const mic = speakers.get(x.id);
       return {
         id: x.id,
         device: x.device,
@@ -600,6 +671,10 @@ export class RoomController extends Store<RoomState> {
         isHost: x.id === room.hostId,
         requested: room.requests.includes(x.id),
         granted: x.id === room.grantId,
+        mic: mic === undefined ? null : mic ? 'muted' : 'live',
+        speaking: speaking.has(x.id),
+        micRequested: room.micRequests.includes(x.id),
+        micGranted: room.micGrants.includes(x.id),
         link: pl?.link ?? null,
         quality: pl?.quality ?? null,
       };
@@ -617,6 +692,18 @@ export class RoomController extends Store<RoomState> {
       hostDevice: deviceOf(room.hostId),
       members,
       requests: room.requests.map((id) => ({ id, device: deviceOf(id) ?? 'Someone' })),
+      micRequests: room.micRequests.map((id) => ({ id, device: deviceOf(id) ?? 'Someone' })),
+      voice: {
+        mic: this.voice.micState,
+        muted: this.voice.isMuted,
+        canTalk: room.hostId === me || room.micGrants.includes(me),
+        myRequest: room.micGrants.includes(me) ? 'granted' : room.micRequests.includes(me) ? 'pending' : 'none',
+        speakerCount: room.speakers.length,
+        full: room.speakers.length >= MAX_SPEAKERS && !speakers.has(me),
+        speaking: this.voice.speakingIds.map((id) => ({ id, device: deviceOf(id) ?? 'Someone', isMe: id === me })),
+        audioSuspended: room.speakers.some((s) => s.id !== me) && this.output ? !this.output.running : false,
+        error: this.voice.error,
+      },
       myRequest: room.grantId === me ? 'granted' : room.requests.includes(me) ? 'pending' : 'none',
       canStart: this.mayStart(),
       signaling: this.online ? 'connected' : 'reconnecting',
@@ -668,6 +755,7 @@ export class RoomController extends Store<RoomState> {
     this.clearTimers();
     this.releaseShare();
     this.closeLink();
+    this.voice.close();
     this.signaling?.close();
     this.signaling = null;
     this.creds = null;
