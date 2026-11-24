@@ -109,6 +109,11 @@ export interface Voice {
   speaking: { id: string; device: string; isMe: boolean }[];
   /** Someone's voice is coming in but this device's sound is suspended. */
   audioSuspended: boolean;
+  /**
+   * Floating window that keeps my mic working with Aura in the background
+   * (Android Chrome cuts the mic otherwise). 'unavailable' when not needed/supported.
+   */
+  pip: 'unavailable' | 'closed' | 'open';
   error: VoiceError | null;
 }
 

@@ -82,6 +82,7 @@ export class RoomController extends Store<RoomState> {
     me: () => this.creds?.memberId ?? null,
     output: () => this.output,
     send: (msg) => this.signaling?.send(msg),
+    title: () => `Aura · room ${this.code ?? ''}`,
     changed: () => this.publish(),
   });
 
@@ -257,6 +258,9 @@ export class RoomController extends Store<RoomState> {
   stopMic = (): void => this.voice.stop();
 
   setMicMuted = (muted: boolean): void => this.voice.setMuted(muted);
+
+  /** Floating window that keeps my mic on with Aura in the background (Android). Call from a tap. */
+  openMicPip = (): void => this.voice.openPip();
 
   requestMic = (): void => {
     this.voice.error = null;
@@ -702,6 +706,7 @@ export class RoomController extends Store<RoomState> {
         full: room.speakers.length >= MAX_SPEAKERS && !speakers.has(me),
         speaking: this.voice.speakingIds.map((id) => ({ id, device: deviceOf(id) ?? 'Someone', isMe: id === me })),
         audioSuspended: room.speakers.some((s) => s.id !== me) && this.output ? !this.output.running : false,
+        pip: this.voice.pipState,
         error: this.voice.error,
       },
       myRequest: room.grantId === me ? 'granted' : room.requests.includes(me) ? 'pending' : 'none',

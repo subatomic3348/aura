@@ -4,7 +4,9 @@ import type { AudioOutput } from '../audio/playback';
 import { ReceiverLink } from '../audio/receiver';
 import { captureMicrophone } from '../audio/sources/mic';
 import { CaptureError, type AudioSource } from '../audio/sources/types';
+import { MicPip, pipSupported } from '../audio/pip';
 import { MeshTransport } from '../audio/transport/mesh';
+import { getCapabilities } from '../lib/capabilities';
 import { keepScreenOn } from '../lib/wakelock';
 import type { VoiceError } from './types';
 
@@ -13,11 +15,15 @@ const SPEAKING_POLL_MS = 100;
 const SPEAKING_LEVEL = 0.32;
 /** Keep showing someone as talking this long after they go quiet (gaps between words). */
 const SPEAKING_HOLD_MS = 700;
+/** After the page hides, wait this long for an automatic PiP window before muting. */
+const BACKGROUND_MUTE_MS = 1000;
 
 export interface VoiceHost {
   me(): string | null;
   output(): AudioOutput | null;
   send(msg: ClientMessage): void;
+  /** Shown in the floating window, e.g. "Aura · room ABCD". */
+  title(): string;
   /** Voice state changed outside a room snapshot: re-render. */
   changed(): void;
 }
@@ -45,6 +51,11 @@ export class VoiceController {
   private transport: MeshTransport | null = null;
   private muted = false;
   private releaseWake: (() => void) | null = null;
+  /** Android only: keeps the mic alive in the background while open. */
+  private pip: MicPip | null = null;
+  /** The page is in the background without a PiP window: the browser has cut my mic. */
+  private backgroundMuted = false;
+  private bgTimer: number | undefined;
 
   private links = new Map<string, { link: ReceiverLink; level: LevelSource | null }>();
   private room: RoomSnapshot | null = null;
@@ -67,6 +78,16 @@ export class VoiceController {
 
   get isMuted(): boolean {
     return this.muted;
+  }
+
+  get pipState(): 'unavailable' | 'closed' | 'open' {
+    if (!this.pip) return 'unavailable';
+    return this.pip.isOpen ? 'open' : 'closed';
+  }
+
+  /** Open the floating window that keeps my mic on in the background. Call from a tap. */
+  openPip(): void {
+    void this.pip?.open().then(() => this.host.changed());
   }
 
   /** My microphone's level while it is on. */
@@ -136,8 +157,32 @@ export class VoiceController {
     this.muted = muted;
     // A disabled track sends silence without renegotiating.
     this.mic.track.enabled = !muted;
-    this.host.send({ type: 'mic:state', muted });
+    this.sendMuted();
+    this.pip?.update(this.host.title(), muted);
     this.host.changed();
+  }
+
+  /** Others see me muted while the browser has cut my mic in the background. */
+  private sendMuted() {
+    this.host.send({ type: 'mic:state', muted: this.muted || this.backgroundMuted });
+  }
+
+  private onVisibility = () => {
+    window.clearTimeout(this.bgTimer);
+    if (document.visibilityState === 'visible') this.setBackgroundMuted(false);
+    // Give an automatic PiP window a moment to open first.
+    else this.bgTimer = window.setTimeout(this.checkBackground, BACKGROUND_MUTE_MS);
+  };
+
+  private checkBackground = () => {
+    if (this.phase !== 'live') return;
+    this.setBackgroundMuted(document.visibilityState === 'hidden' && !this.pip?.isOpen);
+  };
+
+  private setBackgroundMuted(on: boolean) {
+    if (on === this.backgroundMuted || this.phase !== 'live') return;
+    this.backgroundMuted = on;
+    this.sendMuted();
   }
 
   private beginTransport() {
@@ -148,6 +193,18 @@ export class VoiceController {
       this.host.send({ type: 'signal', to: peerId, link: 'voice', fromSender: true, payload }),
     );
     this.transport = t;
+    // Android Chrome cuts the mic of a page in the background; a PiP window keeps it.
+    if (getCapabilities().platform === 'android') {
+      document.addEventListener('visibilitychange', this.onVisibility);
+      if (pipSupported()) {
+        this.pip = new MicPip();
+        this.pip.update(this.host.title(), this.muted);
+        this.pip.onChange(() => {
+          this.checkBackground();
+          this.host.changed();
+        });
+      }
+    }
     // Phones stop the microphone when the screen locks.
     void keepScreenOn().then((release) => {
       if (this.transport === t) this.releaseWake = release;
@@ -164,6 +221,11 @@ export class VoiceController {
     this.mic = null;
     this.releaseWake?.();
     this.releaseWake = null;
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    window.clearTimeout(this.bgTimer);
+    this.pip?.close();
+    this.pip = null;
+    this.backgroundMuted = false;
     this.phase = 'off';
     this.muted = false;
     this.loudAt.delete(this.lastMe ?? '');

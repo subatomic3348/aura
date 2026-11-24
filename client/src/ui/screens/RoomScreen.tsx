@@ -51,6 +51,7 @@ export interface RoomActions {
   startMic(): void;
   stopMic(): void;
   setMicMuted(muted: boolean): void;
+  openMicPip(): void;
   requestMic(): void;
   cancelMicRequest(): void;
   declineMic(): void;
@@ -653,6 +654,18 @@ function VoicePanel({ room, actions, caps, micLevel }: RoomProps) {
             Mic off
           </Button>
         </div>
+        {v.pip === 'closed' && (
+          <>
+            <Button variant="secondary" icon={<Mic />} className={styles.wide} onClick={actions.openMicPip}>
+              Keep my mic on in the background
+            </Button>
+            <p className={styles.tip}>
+              Phones turn the mic off a few seconds after you leave Aura. Tap this first: Aura shrinks to a small floating window and
+              keeps your mic on while you use other apps.
+            </p>
+          </>
+        )}
+        {v.pip === 'open' && <p className={styles.tip}>Aura is in a floating window — your mic stays on in other apps. Close the window to stop that.</p>}
         {!room.isHost && <p className={styles.tip}>Turning your mic off ends your turn; ask again to talk later. Mute keeps it.</p>}
       </>
     );
