@@ -18,18 +18,23 @@ export function rateLink({ rttMs, jitterMs, lossPct }: LinkStats): Quality {
 
 export interface ReceiverStats extends LinkStats {
   relayed: boolean;
+  /** Average time audio waited in the jitter buffer over the last interval. */
+  bufferMs: number | null;
 }
 
 /** Tracks packet counters between calls so loss is measured per interval, not cumulatively. */
 export class InboundStatsSampler {
   private lastLost = 0;
   private lastReceived = 0;
+  private lastBufferDelay = 0;
+  private lastEmitted = 0;
 
   async sample(pc: RTCPeerConnection): Promise<ReceiverStats> {
     const report = await pc.getStats();
     let rttMs: number | null = null;
     let jitterMs: number | null = null;
     let lossPct: number | null = null;
+    let bufferMs: number | null = null;
     let relayed = false;
     let pairLocal: string | undefined;
     let pairRemote: string | undefined;
@@ -44,6 +49,14 @@ export class InboundStatsSampler {
         if (dLost + dRecv > 0) lossPct = (dLost / (dLost + dRecv)) * 100;
         this.lastLost = lost;
         this.lastReceived = received;
+        // jitterBufferDelay is the sum, over every sample played, of its wait in the buffer.
+        if (typeof s.jitterBufferDelay === 'number' && typeof s.jitterBufferEmittedCount === 'number') {
+          const dDelay = s.jitterBufferDelay - this.lastBufferDelay;
+          const dEmitted = s.jitterBufferEmittedCount - this.lastEmitted;
+          if (dEmitted > 0) bufferMs = (dDelay / dEmitted) * 1000;
+          this.lastBufferDelay = s.jitterBufferDelay;
+          this.lastEmitted = s.jitterBufferEmittedCount;
+        }
       }
       if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') {
         if (typeof s.currentRoundTripTime === 'number') rttMs = s.currentRoundTripTime * 1000;
@@ -54,8 +67,20 @@ export class InboundStatsSampler {
     for (const id of [pairLocal, pairRemote]) {
       if (id && report.get(id)?.candidateType === 'relay') relayed = true;
     }
-    return { rttMs, jitterMs, lossPct, relayed };
+    return { rttMs, jitterMs, lossPct, relayed, bufferMs };
   }
+}
+
+/** Sharer side before the network: capture buffer (~5 ms) + one 10 ms Opus packet. */
+const SEND_MS = 15;
+
+/**
+ * How far behind the sharer's own speakers this device plays, roughly:
+ * send side + one-way network + jitter buffer + this device's audio output.
+ */
+export function estimateDelay(st: { rttMs: number | null; bufferMs: number | null }, outputMs: number): number | null {
+  if (st.bufferMs === null) return null;
+  return Math.round(SEND_MS + (st.rttMs ?? 0) / 2 + st.bufferMs + outputMs);
 }
 
 /** Sender's view of one receiver, from RTCP receiver reports. */

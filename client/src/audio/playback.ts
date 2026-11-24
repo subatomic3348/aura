@@ -201,6 +201,12 @@ export class AudioOutput {
     } else this.gain.gain.setTargetAtTime(this.held ? 0 : g, this.ctx.currentTime, 0.015);
   }
 
+  /** This device's audio output delay (buffers + hardware), as the browser reports it. */
+  get outputLatencyMs(): number {
+    const ctx = this.ctx as AudioContext & { outputLatency?: number };
+    return ((ctx.outputLatency || 0) + (ctx.baseLatency || 0)) * 1000;
+  }
+
   /** True when sound can actually reach the speakers. */
   get running(): boolean {
     if (this.mode === 'webaudio') return this.ctx.state === 'running';

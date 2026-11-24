@@ -16,6 +16,7 @@ npm test -w server -- -t "<test name>"   # single test by name
 npm run typecheck      # tsc --noEmit for server, client, worker
 npm run build          # client → client/dist (tsc + vite)
 npm run setup:audio    # Linux: creates the "System sound (Aura)" virtual input
+npm run setup:audio -- --sync 120   # …and delays this laptop's own speakers 120 ms to stay in step with listeners (--remove undoes)
 npm run dev -w worker  # Cloudflare Worker locally (wrangler dev, :8795); secrets in worker/.dev.vars
 npm run deploy:cf      # PRODUCTION: build client + wrangler deploy (needs `npx wrangler login` once)
 ```

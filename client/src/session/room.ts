@@ -2,7 +2,7 @@ import { MAX_SPEAKERS, type IceServer, type RoomSnapshot, type ServerMessage, ty
 import type { LevelSource } from '../audio/level';
 import { AudioMixer } from '../audio/mixer';
 import { AudioOutput } from '../audio/playback';
-import { InboundStatsSampler, rateLink } from '../audio/quality';
+import { estimateDelay, InboundStatsSampler, rateLink } from '../audio/quality';
 import { ReceiverLink, type LinkState } from '../audio/receiver';
 import { captureSound, fileSource, type FileSource, type ShareMode } from '../audio/sources';
 import { CaptureError, type AudioSource, type SourceKind } from '../audio/sources/types';
@@ -581,6 +581,7 @@ export class RoomController extends Store<RoomState> {
       quality: 'unknown',
       stats: { rttMs: null, jitterMs: null, lossPct: null },
       relayed: false,
+      delayMs: null,
       audioSuspended: false,
     };
     this.sampler = new InboundStatsSampler();
@@ -633,9 +634,10 @@ export class RoomController extends Store<RoomState> {
         if (!this.listening) return;
         const stats = { rttMs: st.rttMs, jitterMs: st.jitterMs, lossPct: st.lossPct };
         // While paused no packets arrive, so loss/jitter are meaningless.
+        const delayMs = estimateDelay(st, this.output?.outputLatencyMs ?? 0);
         this.listening = this.listening.paused
           ? { ...this.listening, relayed: st.relayed }
-          : { ...this.listening, stats, relayed: st.relayed, quality: rateLink(stats) };
+          : { ...this.listening, stats, relayed: st.relayed, quality: rateLink(stats), delayMs };
         this.publish();
       } catch {
         /* closed */

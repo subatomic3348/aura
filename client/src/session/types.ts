@@ -89,6 +89,8 @@ export interface Listening {
   quality: Quality;
   stats: LinkStats;
   relayed: boolean;
+  /** Roughly how far (ms) this device plays behind the sharer's own speakers. */
+  delayMs: number | null;
   /** This device suspended its audio output: a tap is needed to hear anything. */
   audioSuspended: boolean;
 }

@@ -560,6 +560,11 @@ function ListeningPanel({ room, actions, level, volume, onVolume, caps }: RoomPr
       <p className={styles.sub}>
         to <strong>{l.sharerDevice}</strong>
         {live && l.relayed ? ' · via relay' : ''}
+        {live && l.delayMs !== null && (
+          <span className="mono" title="How far this device plays behind the sharer's own speakers (estimate)">
+            {' '}· ≈ {l.delayMs} ms behind
+          </span>
+        )}
       </p>
       <div className={styles.meter}>
         <LevelEnvelope source={live ? level : null} active={live && !silent} height={56} label="Sound you are hearing" />
