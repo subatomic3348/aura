@@ -14,6 +14,8 @@ short_description: Real-time audio rooms — share sound to every device nearby
 Real-time audio rooms in the browser. Devices join a room by QR code or link;
 one member at a time shares sound and everyone else hears it (WebRTC, peer-to-peer).
 
+**Live:** [aura.subatomic.in](https://aura.subatomic.in)
+
 ## Develop
 
 ```sh

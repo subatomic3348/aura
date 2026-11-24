@@ -18,6 +18,10 @@
     "bindings": [{ "name": "ROOMS", "class_name": "RoomHub" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomHub"] }],
+  // Served at https://aura.subatomic.in (zone on Cloudflare; DNS + cert are managed
+  // by the custom domain). The workers.dev address keeps working too.
+  "routes": [{ "pattern": "aura.subatomic.in", "custom_domain": true }],
+  "workers_dev": true,
   "observability": { "enabled": true }
   // TURN (optional): `npx wrangler secret put CLOUDFLARE_TURN_KEY_ID` etc., or
   // TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL — see server/src/config.ts.
